@@ -6,6 +6,29 @@ import threading
 from src.utils.logging import get_logger
 
 
+_BARE_MODIFIER_MAP = {
+    "ctrl": keyboard.Key.ctrl_l,
+    "alt": keyboard.Key.alt_l,
+    "shift": keyboard.Key.shift,
+    "super": keyboard.Key.cmd,
+}
+
+# Also match right-side variants
+_MODIFIER_VARIANTS = {
+    keyboard.Key.ctrl_l: "ctrl",
+    keyboard.Key.ctrl_r: "ctrl",
+    keyboard.Key.alt_l: "alt",
+    keyboard.Key.alt_r: "alt",
+    keyboard.Key.alt_gr: "alt",
+    keyboard.Key.shift: "shift",
+    keyboard.Key.shift_l: "shift",
+    keyboard.Key.shift_r: "shift",
+    keyboard.Key.cmd: "super",
+    keyboard.Key.cmd_l: "super",
+    keyboard.Key.cmd_r: "super",
+}
+
+
 class HotkeyManager:
     """Cross-platform global hotkey manager supporting keyboard and mouse inputs."""
 
@@ -18,12 +41,15 @@ class HotkeyManager:
         """
         self.callback = callback
         self.current_hotkey: Optional[str] = None
-        self.keyboard_listener: Optional[keyboard.GlobalHotKeys] = None
+        self.keyboard_listener: Optional[Union[keyboard.GlobalHotKeys, keyboard.Listener]] = None
         self._xinput_procs: list[subprocess.Popen] = []
         self._xinput_stop = threading.Event()
         self.is_listening = False
         self._lock = threading.Lock()
         self._is_mouse_hotkey = False
+        self._is_bare_modifier = False
+        self._bare_modifier_name: Optional[str] = None
+        self._other_key_pressed = False
         self._extra_hotkeys: dict = {}  # key_combination -> callback
         self.logger = get_logger(__name__)
 
@@ -176,6 +202,20 @@ class HotkeyManager:
 
     def _setup_keyboard_listener(self, key_combination: str) -> None:
         """Set up keyboard listener for keyboard hotkeys."""
+        bare_name = key_combination.lower().strip()
+        if bare_name in _BARE_MODIFIER_MAP and "+" not in key_combination:
+            # Bare modifier hotkey: fire only on press-and-release with no
+            # intervening keys (so Ctrl+C etc. won't trigger it).
+            self._is_bare_modifier = True
+            self._bare_modifier_name = bare_name
+            self._other_key_pressed = False
+            self.keyboard_listener = keyboard.Listener(
+                on_press=self._on_bare_mod_press,
+                on_release=self._on_bare_mod_release,
+            )
+            return
+
+        self._is_bare_modifier = False
         normalized_hotkey = self._normalize_hotkey(key_combination)
         hotkey_dict = {normalized_hotkey: self._on_hotkey_pressed}
 
@@ -186,6 +226,22 @@ class HotkeyManager:
                 hotkey_dict[normalized] = cb
 
         self.keyboard_listener = keyboard.GlobalHotKeys(hotkey_dict)
+
+    def _on_bare_mod_press(self, key: Union[keyboard.Key, keyboard.KeyCode]) -> None:
+        """Track whether non-target keys are pressed during a bare modifier hold."""
+        mod_name = _MODIFIER_VARIANTS.get(key)
+        if mod_name == self._bare_modifier_name:
+            # Target modifier pressed, reset the flag
+            self._other_key_pressed = False
+        else:
+            # Any other key pressed while modifier is held
+            self._other_key_pressed = True
+
+    def _on_bare_mod_release(self, key: Union[keyboard.Key, keyboard.KeyCode]) -> None:
+        """Fire the hotkey callback when the bare modifier is released cleanly."""
+        mod_name = _MODIFIER_VARIANTS.get(key)
+        if mod_name == self._bare_modifier_name and not self._other_key_pressed:
+            self._on_hotkey_pressed()
 
     def _setup_mouse_listener(self, key_combination: str) -> None:
         """Validate mouse button hotkey format. Actual listeners start in start_listening()."""

@@ -194,11 +194,20 @@ class HotkeyButton(QPushButton):
             self.setText(self._hotkey or "(none)")
             self.setStyleSheet("")
 
+    # Map Qt modifier key codes to short names (for bare-modifier capture)
+    _MOD_KEY_NAMES = {
+        Qt.Key.Key_Control: "ctrl",
+        Qt.Key.Key_Alt: "alt",
+        Qt.Key.Key_Shift: "shift",
+        Qt.Key.Key_Meta: "super",
+    }
+
     def _start_capture(self) -> None:
         if self._capturing:
             return
         self._capturing = True
         self._held_modifiers = []
+        self._non_modifier_pressed = False
         self._update_display()
         self.grabKeyboard()
         # Start xinput-based mouse button listener on all pointer devices
@@ -288,6 +297,8 @@ class HotkeyButton(QPushButton):
                    Qt.Key.Key_Meta, Qt.Key.Key_AltGr):
             return
 
+        self._non_modifier_pressed = True
+
         # Build the hotkey string
         parts = []
         modifiers = event.modifiers()
@@ -319,6 +330,17 @@ class HotkeyButton(QPushButton):
         if not self._capturing:
             super().keyReleaseEvent(event)
             return
+
+        # If a modifier is released and no non-modifier key was pressed,
+        # accept the bare modifier as the hotkey (e.g. just "ctrl")
+        key = event.key()
+        if not self._non_modifier_pressed and key in self._MOD_KEY_NAMES:
+            # Check no other modifiers are still held
+            remaining = event.modifiers()
+            if not remaining or remaining == Qt.KeyboardModifier.NoModifier:
+                self._finish_capture(self._MOD_KEY_NAMES[key])
+                return
+
         # Swallow key releases during capture
         event.accept()
 

@@ -479,6 +479,264 @@ class NumberNormalizationStage(CorrectionStage):
         return total
 
 
+class SegmentJoinStage(CorrectionStage):
+    """Fix spurious sentence breaks from segmented transcription and ASR over-punctuation.
+
+    When audio is transcribed in segments, the model creates artificial sentence
+    boundaries at segment edges — a period and capitalized word where the original
+    speech was continuous. Qwen3-ASR also tends to over-punctuate in English
+    (likely from Chinese-heavy training data). This stage detects and merges
+    these breaks using two rules:
+
+    1. Period after non-terminal word: English sentences cannot end with articles,
+       prepositions, conjunctions, or determiners. If one does, the period is
+       spurious and is removed.
+    2. Period before coordinating conjunction: ". And", ". But", ". Or" etc. are
+       merged into the previous sentence with a comma.
+    """
+
+    name = "segment_join"
+
+    # Words that cannot end an English sentence. If the word immediately before
+    # a period is in this set, the period is spurious.
+    _NON_TERMINAL = {
+        # Articles
+        "a", "an", "the",
+        # Prepositions
+        "of", "on", "in", "at", "for", "with", "to", "from", "by", "about",
+        "into", "through", "during", "before", "after", "between", "among",
+        "upon", "within", "without", "across", "along", "behind", "below",
+        "beneath", "beside", "beyond", "toward", "towards", "until", "under",
+        "onto", "per", "via", "than", "like", "near", "above", "against",
+        # Conjunctions
+        "and", "but", "or", "nor", "so", "yet",
+        # Possessives / determiners that always need a following noun.
+        # Note: "this", "that", "these", "those" are excluded because they
+        # can be demonstrative pronouns that end sentences ("I want that.").
+        "its", "their", "his", "her", "our", "your", "my",
+        "some", "any", "each", "every", "which", "what", "whose", "no",
+    }
+
+    # Coordinating conjunctions that should not start a sentence in
+    # spoken transcription. When preceded by a period, merge with comma.
+    _CONJUNCTIONS = {"and", "but", "or", "nor", "so", "yet"}
+
+    # Words that, when appearing capitalized after a period, indicate
+    # the period was spurious. These are words that almost always continue
+    # a preceding clause rather than starting an independent sentence.
+    # Excludes personal pronouns (I/He/She/We/They/It/You) and
+    # demonstratives (This/That) which genuinely start sentences.
+    _CONTINUATION_STARTERS = {
+        # Prepositions — "dependent. On systems" → "dependent on systems"
+        "on", "in", "at", "of", "for", "with", "from", "by", "about",
+        "into", "through", "during", "before", "after", "between",
+        "among", "upon", "within", "without", "across", "along",
+        "behind", "below", "beneath", "beside", "beyond", "toward",
+        "towards", "until", "under", "onto", "per", "via", "than",
+        "like", "near", "above", "against",
+        # Possessives — "handles. Its details" → "handles its details"
+        "its", "their", "his", "her", "our", "your", "my",
+        # Subordinating conjunctions
+        "because", "since", "although", "though", "while", "unless",
+        "whereas", "wherever", "whenever", "whether",
+        # Continuation adverbs
+        "instead", "also", "just", "even", "still", "then",
+        "especially", "particularly", "including",
+        "very", "really", "quite", "rather", "fairly", "pretty",
+        "simply", "merely", "only", "already", "always", "never",
+        "often", "sometimes", "usually", "constantly", "currently",
+        "actually", "basically", "certainly", "definitely",
+    }
+
+    # Common abbreviations that end with a period but aren't sentence endings.
+    # The period after these should never be removed.
+    _ABBREVIATIONS = {
+        "dr", "mr", "ms", "mrs", "jr", "sr", "st", "vs", "prof", "gen",
+        "sgt", "cpl", "pvt", "lt", "capt", "maj", "col", "inc", "corp",
+        "ltd", "dept", "approx", "est", "govt", "assn",
+    }
+
+    def _apply_pass(self, text: str, pattern: re.Pattern,
+                    replacer, corrections: list) -> str:
+        """Apply a regex pattern iteratively, collecting corrections."""
+        parts = []
+        last_end = 0
+        for m in pattern.finditer(text):
+            replacement = replacer(m)
+            if replacement is not None:
+                corrections.append(CorrectionRecord(
+                    stage=self.name,
+                    original=m.group(0),
+                    corrected=replacement,
+                    position=m.start(),
+                ))
+                parts.append(text[last_end:m.start()])
+                parts.append(replacement)
+                last_end = m.end()
+        parts.append(text[last_end:])
+        return "".join(parts)
+
+    # Words that can start legitimate short sentences — don't merge fragments
+    # beginning with these. Includes subject pronouns ("He left."), articles
+    # ("The dog ran."), and demonstratives ("That works.").
+    _SENTENCE_STARTERS = {
+        "i", "he", "she", "we", "they", "it", "you", "one",
+        "the", "a", "an", "this", "that", "these", "those",
+        "there", "here", "what", "who", "how", "if",
+    }
+
+    def apply(self, text: str) -> CorrectionResult:
+        if not text:
+            return CorrectionResult(text=text)
+
+        corrections = []
+        result = text
+
+        # Regex matching "word. Next" — used by passes 1 and 2.
+        # [A-Z]\w* matches both "A" (single letter) and "About" (multi-letter).
+        word_period_word = re.compile(r'(\b\w+)\.(\s+)([A-Z]\w*)')
+
+        # Pass 1: Period after non-terminal word.
+        # "word. Next" → "word next" when word can't end a sentence.
+        result = self._apply_pass(result, word_period_word, lambda m: (
+            f"{m.group(1)} {m.group(3)[0].lower()}{m.group(3)[1:]}"
+            if m.group(1).lower() in self._NON_TERMINAL
+            and m.group(1).lower() not in self._ABBREVIATIONS
+            else None
+        ), corrections)
+
+        # Pass 2: Period before continuation starter word.
+        # "dependent. On" → "dependent on", "handles. Its" → "handles its"
+        result = self._apply_pass(result, word_period_word, lambda m: (
+            f"{m.group(1)} {m.group(3)[0].lower()}{m.group(3)[1:]}"
+            if m.group(3).lower() in self._CONTINUATION_STARTERS
+            and m.group(1).lower() not in self._ABBREVIATIONS
+            else None
+        ), corrections)
+
+        # Pass 3: Period or semicolon before coordinating conjunction.
+        # ". And" → ", and" / ". But" → ", but"
+        conj_alts = "|".join(w.capitalize() for w in self._CONJUNCTIONS)
+        p3 = re.compile(r'([.;])\s+(' + conj_alts + r')\b')
+        result = self._apply_pass(result, p3, lambda m: (
+            f", {m.group(2).lower()}"
+        ), corrections)
+
+        # Pass 4: Bare pronoun before period after a comma.
+        # "instead, they. Collaborate" → "instead, they collaborate"
+        # A pronoun immediately after a comma and before a period is a
+        # continuation, not a complete sentence.
+        pronouns = "i|he|she|we|they|it|you"
+        p4 = re.compile(
+            r',\s+(' + pronouns + r')\.(\s+)([A-Z][a-z]\w*)',
+            re.IGNORECASE,
+        )
+        result = self._apply_pass(result, p4, lambda m: (
+            f", {m.group(1).lower()} {m.group(3)[0].lower()}{m.group(3)[1:]}"
+        ), corrections)
+
+        # Pass 5: Relative pronoun after period.
+        # "set up. That can produce" → "set up that can produce"
+        # When "That"/"Which"/"Who" after a period is followed by a modal verb,
+        # it's almost certainly a relative pronoun, not a demonstrative.
+        # Restricted to modals to avoid false positives like
+        # "He said that. That was wrong." (be-verb = demonstrative).
+        modals = "can|could|will|would|shall|should|may|might|must"
+        p5 = re.compile(
+            r'(\b\w+)\.\s+(That|Which|Who)\s+(' + modals + r')\b',
+            re.IGNORECASE,
+        )
+        result = self._apply_pass(result, p5, lambda m: (
+            f"{m.group(1)} {m.group(2).lower()} {m.group(3).lower()}"
+            if m.group(1).lower() not in self._ABBREVIATIONS else None
+        ), corrections)
+
+        # Pass 6: Short fragment merging.
+        # If a "sentence" between two periods is ≤ 3 words and doesn't
+        # start with a subject pronoun, it's likely a segment fragment.
+        # Remove the trailing period and merge with the next sentence.
+        # Run iteratively since merging can create new short fragments.
+        for _ in range(3):  # max iterations to avoid infinite loops
+            merged = self._merge_short_fragments(result, corrections)
+            if merged == result:
+                break
+            result = merged
+
+        return CorrectionResult(text=result, corrections=corrections)
+
+    def _merge_short_fragments(self, text: str, corrections: list) -> str:
+        """Merge short sentence fragments backward into the preceding sentence.
+
+        If a "sentence" between two periods is ≤ 3 words and doesn't look
+        like a complete sentence, remove the period BEFORE it (merge backward)
+        and lowercase the fragment's first letter.
+
+        "creates a new. Kind of workflow. The developer..."
+        → "creates a new kind of workflow. The developer..."
+        """
+        # Find all sentence boundaries: period + whitespace + capital letter
+        boundaries = list(re.finditer(r'\.(\s+)([A-Z])', text))
+        if len(boundaries) < 2:
+            return text
+
+        # Identify which boundaries start a short fragment
+        to_remove = set()  # indices of boundaries to remove (merge backward)
+
+        for i in range(len(boundaries) - 1):
+            curr = boundaries[i]
+            nxt = boundaries[i + 1]
+
+            # Fragment text between curr and nxt boundaries
+            frag_start = curr.start() + 1  # skip the period
+            frag_text = text[frag_start:nxt.start()].strip()
+            frag_words = [w for w in frag_text.split() if w.strip(".,;:!?")]
+
+            if not frag_words or len(frag_words) > 3:
+                continue
+
+            # Don't merge if the period follows an abbreviation
+            pre_period_text = text[:curr.start()].rstrip()
+            last_word_before = pre_period_text.split()[-1].lower().rstrip(".,;:!?") if pre_period_text else ""
+            if last_word_before in self._ABBREVIATIONS:
+                continue
+
+            first_word = frag_words[0].lower().rstrip(".,;:!?")
+
+            # Don't merge if the fragment looks like a complete sentence:
+            # starts with a subject pronoun or common sentence starter
+            if first_word in self._SENTENCE_STARTERS:
+                continue
+
+            # This fragment should be merged backward: remove boundary[i]
+            to_remove.add(i)
+
+        if not to_remove:
+            return text
+
+        # Rebuild text, removing the periods at marked boundaries
+        parts = []
+        last_end = 0
+        for i, m in enumerate(boundaries):
+            if i in to_remove:
+                # Remove this period and lowercase the next word
+                parts.append(text[last_end:m.start()])  # text before the period
+                cap_pos = m.start(2)  # absolute position of the capital letter
+                lowered = text[cap_pos].lower()
+                parts.append(" " + lowered)
+                last_end = cap_pos + 1
+
+                original = text[m.start():cap_pos + 1]
+                corrections.append(CorrectionRecord(
+                    stage=self.name,
+                    original=original,
+                    corrected=f" {lowered}",
+                    position=m.start(),
+                ))
+
+        parts.append(text[last_end:])
+        return "".join(parts)
+
+
 class CorrectionPipeline:
     """Runs text through ordered correction stages."""
 
@@ -486,6 +744,7 @@ class CorrectionPipeline:
         self.stages: List[CorrectionStage] = [
             TermReplacementStage(config_dir),
             NumberNormalizationStage(enabled=number_normalization_enabled),
+            SegmentJoinStage(),
         ]
 
     @property
