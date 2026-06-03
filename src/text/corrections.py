@@ -441,37 +441,57 @@ class NumberNormalizationStage(CorrectionStage):
         return None
 
     def _parse_integer(self, words: List[str]) -> Optional[int]:
-        """Parse a list of number words into an integer."""
+        """Parse a list of number words into an integer.
+
+        Rejects sequences that aren't valid English numbers, e.g.
+        "ten thirty" (model number / time) or "forty ninety" — two
+        tens-values in a row without a scale word between them.
+        """
         if not words:
             return None
 
         total = 0
         current = 0
+        has_tens = False   # current group already has a tens-place word
+        has_ones = False   # current group already has a ones-place word
 
         for word in words:
             if word in self._ONES:
-                current += self._ONES[word]
+                val = self._ONES[word]
+                if has_ones:
+                    # Two ones-values in a group: "ten twelve" — not valid
+                    return None
+                if val >= 10 and has_tens:
+                    # e.g. "thirty fifteen" — tens already set
+                    return None
+                current += val
+                has_ones = True
+                if val >= 10:
+                    # 10-19 also occupy the tens place
+                    has_tens = True
             elif word in self._TENS:
+                if has_ones:
+                    # "twelve thirty" — ones already set, can't add tens
+                    return None
+                if has_tens:
+                    # Two tens-values in a group: "forty ninety" — not valid
+                    return None
                 current += self._TENS[word]
+                has_tens = True
             elif word == "hundred":
                 if current == 0:
                     current = 1
                 current *= 100
-            elif word == "thousand":
+                # Reset — ones/tens can follow ("three hundred twenty one")
+                has_tens = False
+                has_ones = False
+            elif word in self._SCALES:
                 if current == 0:
                     current = 1
-                total += current * 1000
+                total += current * self._SCALES[word]
                 current = 0
-            elif word == "million":
-                if current == 0:
-                    current = 1
-                total += current * 1_000_000
-                current = 0
-            elif word == "billion":
-                if current == 0:
-                    current = 1
-                total += current * 1_000_000_000
-                current = 0
+                has_tens = False
+                has_ones = False
             else:
                 return None
 
