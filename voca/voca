@@ -1,0 +1,19 @@
+#!/bin/bash
+# Voca launcher script
+# GUI mode is the default. Use --cli for command-line mode.
+
+# Get the project root (one level above this script's directory)
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PROJECT_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
+
+cd "$PROJECT_ROOT"
+
+# Prefer uv run (handles venv automatically), fall back to direct venv
+if command -v uv >/dev/null 2>&1; then
+    exec uv run voca "$@"
+elif [ -x "$PROJECT_ROOT/.venv/bin/python3" ]; then
+    exec "$PROJECT_ROOT/.venv/bin/python3" -m voca.main "$@"
+else
+    echo "Error: No Python environment found. Install uv or create a .venv." >&2
+    exit 1
+fi
