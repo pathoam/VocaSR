@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Build script for VoiceBox executable
+Build script for Voca executable
 Creates single-file executables for different platforms
 """
 
@@ -18,14 +18,14 @@ def get_platform_info():
     arch = platform.machine().lower()
     
     if system == "windows":
-        exe_name = "voicebox.exe"
-        dist_name = f"voicebox-windows-{arch}"
+        exe_name = "voca.exe"
+        dist_name = f"voca-windows-{arch}"
     elif system == "darwin":
-        exe_name = "voicebox"
-        dist_name = f"voicebox-macos-{arch}"
+        exe_name = "voca"
+        dist_name = f"voca-macos-{arch}"
     else:  # linux and others
-        exe_name = "voicebox"
-        dist_name = f"voicebox-linux-{arch}"
+        exe_name = "voca"
+        dist_name = f"voca-linux-{arch}"
     
     return system, arch, exe_name, dist_name
 
@@ -67,7 +67,7 @@ def build_executable():
     # PyInstaller command
     cmd = [
         "python", "-m", "PyInstaller",
-        "build_config/voicebox.spec",
+        "build_config/voca.spec",
         "--clean",
         "--noconfirm"
     ]
@@ -121,23 +121,23 @@ def create_installer_script():
     
     if system == "windows":
         installer_content = f"""@echo off
-echo Installing VoiceBox...
-copy {exe_name} "%USERPROFILE%\\AppData\\Local\\VoiceBox\\{exe_name}"
-echo VoiceBox installed to %USERPROFILE%\\AppData\\Local\\VoiceBox\\
-echo You can now run VoiceBox from the Start Menu or add it to your PATH
+echo Installing Voca...
+copy {exe_name} "%USERPROFILE%\\AppData\\Local\\Voca\\{exe_name}"
+echo Voca installed to %USERPROFILE%\\AppData\\Local\\Voca\\
+echo You can now run Voca from the Start Menu or add it to your PATH
 pause
 """
         installer_path = Path("dist") / dist_name / "install.bat"
         
     else:  # Unix-like systems
         installer_content = f"""#!/bin/bash
-echo "Installing VoiceBox..."
+echo "Installing Voca..."
 mkdir -p ~/.local/bin
 cp {exe_name} ~/.local/bin/{exe_name}
 chmod +x ~/.local/bin/{exe_name}
-echo "VoiceBox installed to ~/.local/bin/{exe_name}"
-echo "Make sure ~/.local/bin is in your PATH to run 'voicebox' from anywhere"
-echo "Or run directly: ~/.local/bin/voicebox"
+echo "Voca installed to ~/.local/bin/{exe_name}"
+echo "Make sure ~/.local/bin is in your PATH to run 'voca' from anywhere"
+echo "Or run directly: ~/.local/bin/voca"
 """
         installer_path = Path("dist") / dist_name / "install.sh"
     
@@ -183,7 +183,7 @@ def test_executable():
 
 def main():
     """Main build function."""
-    print("VoiceBox Build Script")
+    print("Voca Build Script")
     print("=" * 40)
     
     if not check_dependencies():

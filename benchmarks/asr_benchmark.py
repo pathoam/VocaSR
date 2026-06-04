@@ -5,7 +5,7 @@ Loads the Qwen ASR model once, runs 4 transcription tests on real recorded
 audio (2 durations x 2 modes), and prints a comparison table with latency
 metrics and over-punctuation analysis.
 
-Run from voicebox root:
+Run from voca root:
     .venv/bin/python benchmarks/asr_benchmark.py
 """
 
@@ -18,18 +18,18 @@ import glob
 
 import numpy as np
 
-# Ensure voicebox src is importable
+# Ensure voca package is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.transcription.qwen_asr import QwenASRService
-from src.text.corrections import SegmentJoinStage
+from voca.transcription.qwen_asr import QwenASRService
+from voca.text.corrections import SegmentJoinStage
 
 
 # ---------------------------------------------------------------------------
 # Audio selection
 # ---------------------------------------------------------------------------
 
-TRAINING_DIR = os.path.expanduser("~/.config/VoiceBox/training_data/audio")
+TRAINING_DIR = os.path.expanduser("~/.config/Voca/training_data/audio")
 TARGET_DURATIONS = [10, 60]  # seconds
 SEGMENT_TARGET_SEC = 8.0  # pipeline's target segment length
 

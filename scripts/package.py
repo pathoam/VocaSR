@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Comprehensive packaging script for VoiceBox
+Comprehensive packaging script for Voca
 Creates various distribution formats for easy installation
 """
 
@@ -16,8 +16,8 @@ from pathlib import Path
 from datetime import datetime
 
 
-class VoiceBoxPackager:
-    """Main packaging coordinator for VoiceBox distributions."""
+class VocaPackager:
+    """Main packaging coordinator for Voca distributions."""
     
     def __init__(self):
         self.project_root = Path(__file__).parent.parent.absolute()
@@ -46,8 +46,8 @@ class VoiceBoxPackager:
         return {
             "system": system,
             "arch": arch,
-            "exe_name": "voicebox.exe" if system == "windows" else "voicebox",
-            "dist_name": f"voicebox-{system}-{arch}",
+            "exe_name": "voca.exe" if system == "windows" else "voca",
+            "dist_name": f"voca-{system}-{arch}",
             "archive_ext": ".zip" if system == "windows" else ".tar.gz"
         }
     
@@ -73,29 +73,29 @@ class VoiceBoxPackager:
         
         # Create portable launcher script
         if self.platform_info['system'] == 'windows':
-            launcher = package_dir / "run_voicebox.bat"
+            launcher = package_dir / "run_voca.bat"
             launcher.write_text("""@echo off
-echo Starting VoiceBox...
-"%~dp0voicebox.exe" %*
+echo Starting Voca...
+"%~dp0voca.exe" %*
 """)
         else:
-            launcher = package_dir / "run_voicebox.sh"
+            launcher = package_dir / "run_voca.sh"
             launcher.write_text("""#!/bin/bash
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-"$SCRIPT_DIR/voicebox" "$@"
+"$SCRIPT_DIR/voca" "$@"
 """)
             launcher.chmod(0o755)
         
         # Add README for portable version
         readme = package_dir / "README_PORTABLE.txt"
-        readme.write_text(f"""VoiceBox Portable v{self.version}
+        readme.write_text(f"""Voca Portable v{self.version}
 =====================================
 
-This is a portable version of VoiceBox that can be run from any location.
+This is a portable version of Voca that can be run from any location.
 
 QUICK START:
-{'- Double-click run_voicebox.bat' if self.platform_info['system'] == 'windows' else '- Run: ./run_voicebox.sh'}
-- Or run the voicebox executable directly
+{'- Double-click run_voca.bat' if self.platform_info['system'] == 'windows' else '- Run: ./run_voca.sh'}
+- Or run the voca executable directly
 
 NO INSTALLATION REQUIRED!
 Just extract this folder anywhere and run.
@@ -172,11 +172,11 @@ For more information, visit the project repository.
         install_script = package_dir / "install.bat"
         install_script.write_text(f"""@echo off
 echo ====================================
-echo VoiceBox Installer v{self.version}
+echo Voca Installer v{self.version}
 echo ====================================
 echo.
 
-set INSTALL_DIR=%LOCALAPPDATA%\\VoiceBox
+set INSTALL_DIR=%LOCALAPPDATA%\\Voca
 set START_MENU=%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs
 
 echo Installing to: %INSTALL_DIR%
@@ -187,20 +187,20 @@ if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 
 :: Copy executable
 echo Copying files...
-copy /Y voicebox.exe "%INSTALL_DIR%\\" >nul
+copy /Y voca.exe "%INSTALL_DIR%\\" >nul
 
 :: Create Start Menu shortcut (using PowerShell)
 echo Creating Start Menu shortcut...
-powershell -Command "$WshShell = New-Object -comObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%START_MENU%\\VoiceBox.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\\voicebox.exe'; $Shortcut.IconLocation = '%INSTALL_DIR%\\voicebox.exe'; $Shortcut.Save()"
+powershell -Command "$WshShell = New-Object -comObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%START_MENU%\\Voca.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\\voca.exe'; $Shortcut.IconLocation = '%INSTALL_DIR%\\voca.exe'; $Shortcut.Save()"
 
 :: Add to PATH (optional, requires admin)
 echo.
 echo Installation complete!
 echo.
-echo VoiceBox has been installed to: %INSTALL_DIR%
+echo Voca has been installed to: %INSTALL_DIR%
 echo You can now:
-echo   - Run VoiceBox from the Start Menu
-echo   - Or run directly: %INSTALL_DIR%\\voicebox.exe
+echo   - Run Voca from the Start Menu
+echo   - Or run directly: %INSTALL_DIR%\\voca.exe
 echo.
 echo Press any key to exit...
 pause >nul
@@ -210,15 +210,15 @@ pause >nul
         uninstall_script = package_dir / "uninstall.bat"
         uninstall_script.write_text("""@echo off
 echo ====================================
-echo VoiceBox Uninstaller
+echo Voca Uninstaller
 echo ====================================
 echo.
 
-set INSTALL_DIR=%LOCALAPPDATA%\\VoiceBox
+set INSTALL_DIR=%LOCALAPPDATA%\\Voca
 set START_MENU=%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs
-set CONFIG_DIR=%APPDATA%\\VoiceBox
+set CONFIG_DIR=%APPDATA%\\Voca
 
-echo This will uninstall VoiceBox from your system.
+echo This will uninstall Voca from your system.
 echo.
 set /p CONFIRM=Are you sure? (y/N): 
 if /i not "%CONFIRM%"=="y" exit
@@ -230,9 +230,9 @@ if exist "%INSTALL_DIR%" (
 )
 
 :: Remove Start Menu shortcut
-if exist "%START_MENU%\\VoiceBox.lnk" (
+if exist "%START_MENU%\\Voca.lnk" (
     echo Removing Start Menu shortcut...
-    del "%START_MENU%\\VoiceBox.lnk"
+    del "%START_MENU%\\Voca.lnk"
 )
 
 :: Ask about config files
@@ -246,7 +246,7 @@ if exist "%CONFIG_DIR%" (
 )
 
 echo.
-echo VoiceBox has been uninstalled.
+echo Voca has been uninstalled.
 echo Press any key to exit...
 pause >nul
 """)
@@ -257,12 +257,12 @@ pause >nul
         install_script.write_text(f"""#!/bin/bash
 
 echo "===================================="
-echo "VoiceBox Installer v{self.version}"
+echo "Voca Installer v{self.version}"
 echo "===================================="
 echo
 
-INSTALL_DIR="/Applications/VoiceBox"
-BIN_LINK="/usr/local/bin/voicebox"
+INSTALL_DIR="/Applications/Voca"
+BIN_LINK="/usr/local/bin/voca"
 
 echo "Installing to: $INSTALL_DIR"
 echo
@@ -272,32 +272,32 @@ sudo mkdir -p "$INSTALL_DIR"
 
 # Copy executable
 echo "Copying files..."
-sudo cp voicebox "$INSTALL_DIR/"
-sudo chmod +x "$INSTALL_DIR/voicebox"
+sudo cp voca "$INSTALL_DIR/"
+sudo chmod +x "$INSTALL_DIR/voca"
 
 # Create symlink for command line access
 echo "Creating command line link..."
-sudo ln -sf "$INSTALL_DIR/voicebox" "$BIN_LINK"
+sudo ln -sf "$INSTALL_DIR/voca" "$BIN_LINK"
 
 # Create .app bundle (basic)
 echo "Creating application bundle..."
-APP_DIR="$INSTALL_DIR/VoiceBox.app/Contents/MacOS"
+APP_DIR="$INSTALL_DIR/Voca.app/Contents/MacOS"
 sudo mkdir -p "$APP_DIR"
-sudo cp voicebox "$APP_DIR/"
-sudo chmod +x "$APP_DIR/voicebox"
+sudo cp voca "$APP_DIR/"
+sudo chmod +x "$APP_DIR/voca"
 
 # Create Info.plist
-sudo tee "$INSTALL_DIR/VoiceBox.app/Contents/Info.plist" > /dev/null <<EOF
+sudo tee "$INSTALL_DIR/Voca.app/Contents/Info.plist" > /dev/null <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>VoiceBox</string>
+    <string>Voca</string>
     <key>CFBundleExecutable</key>
-    <string>voicebox</string>
+    <string>voca</string>
     <key>CFBundleIdentifier</key>
-    <string>com.voicebox.app</string>
+    <string>com.voca.app</string>
     <key>CFBundleVersion</key>
     <string>{self.version}</string>
 </dict>
@@ -308,8 +308,8 @@ echo
 echo "Installation complete!"
 echo
 echo "You can now:"
-echo "  - Run VoiceBox from Applications folder"
-echo "  - Or use 'voicebox' command in Terminal"
+echo "  - Run Voca from Applications folder"
+echo "  - Or use 'voca' command in Terminal"
 echo
 echo "Note: You may need to grant accessibility permissions"
 echo "in System Preferences > Security & Privacy > Privacy"
@@ -321,15 +321,15 @@ echo "in System Preferences > Security & Privacy > Privacy"
         uninstall_script.write_text("""#!/bin/bash
 
 echo "===================================="
-echo "VoiceBox Uninstaller"
+echo "Voca Uninstaller"
 echo "===================================="
 echo
 
-INSTALL_DIR="/Applications/VoiceBox"
-BIN_LINK="/usr/local/bin/voicebox"
-CONFIG_DIR="$HOME/Library/Application Support/VoiceBox"
+INSTALL_DIR="/Applications/Voca"
+BIN_LINK="/usr/local/bin/voca"
+CONFIG_DIR="$HOME/Library/Application Support/Voca"
 
-echo "This will uninstall VoiceBox from your system."
+echo "This will uninstall Voca from your system."
 read -p "Are you sure? (y/N): " CONFIRM
 if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
     exit 0
@@ -358,7 +358,7 @@ if [ -d "$CONFIG_DIR" ]; then
 fi
 
 echo
-echo "VoiceBox has been uninstalled."
+echo "Voca has been uninstalled."
 """)
         uninstall_script.chmod(0o755)
     
@@ -368,18 +368,18 @@ echo "VoiceBox has been uninstalled."
         install_script.write_text(f"""#!/bin/bash
 
 echo "===================================="
-echo "VoiceBox Installer v{self.version}"
+echo "Voca Installer v{self.version}"
 echo "===================================="
 echo
 
 # Detect if running as root
 if [ "$EUID" -eq 0 ]; then
-    INSTALL_DIR="/opt/voicebox"
+    INSTALL_DIR="/opt/voca"
     BIN_DIR="/usr/local/bin"
     DESKTOP_DIR="/usr/share/applications"
     SYSTEM_INSTALL=true
 else
-    INSTALL_DIR="$HOME/.local/opt/voicebox"
+    INSTALL_DIR="$HOME/.local/opt/voca"
     BIN_DIR="$HOME/.local/bin"
     DESKTOP_DIR="$HOME/.local/share/applications"
     SYSTEM_INSTALL=false
@@ -394,22 +394,22 @@ mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$DESKTOP_DIR"
 
 # Copy executable
 echo "Copying files..."
-cp voicebox "$INSTALL_DIR/"
-chmod +x "$INSTALL_DIR/voicebox"
+cp voca "$INSTALL_DIR/"
+chmod +x "$INSTALL_DIR/voca"
 
 # Create symlink
 echo "Creating command line link..."
-ln -sf "$INSTALL_DIR/voicebox" "$BIN_DIR/voicebox"
+ln -sf "$INSTALL_DIR/voca" "$BIN_DIR/voca"
 
 # Create desktop entry
 echo "Creating desktop entry..."
-cat > "$DESKTOP_DIR/voicebox.desktop" <<EOF
+cat > "$DESKTOP_DIR/voca.desktop" <<EOF
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=VoiceBox
+Name=Voca
 Comment=Voice-to-Text Transcription Tool
-Exec=$INSTALL_DIR/voicebox
+Exec=$INSTALL_DIR/voca
 Icon=audio-input-microphone
 Terminal=true
 Categories=Utility;AudioVideo;
@@ -423,7 +423,7 @@ fi
 # Add to PATH if needed
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
     echo
-    echo "Note: Add $BIN_DIR to your PATH to run 'voicebox' from anywhere:"
+    echo "Note: Add $BIN_DIR to your PATH to run 'voca' from anywhere:"
     echo "  echo 'export PATH=\\$PATH:$BIN_DIR' >> ~/.bashrc"
 fi
 
@@ -431,9 +431,9 @@ echo
 echo "Installation complete!"
 echo
 echo "You can now:"
-echo "  - Run 'voicebox' from terminal"
+echo "  - Run 'voca' from terminal"
 echo "  - Launch from your application menu"
-echo "  - Or run directly: $INSTALL_DIR/voicebox"
+echo "  - Or run directly: $INSTALL_DIR/voca"
 """)
         install_script.chmod(0o755)
         
@@ -442,27 +442,27 @@ echo "  - Or run directly: $INSTALL_DIR/voicebox"
         uninstall_script.write_text("""#!/bin/bash
 
 echo "===================================="
-echo "VoiceBox Uninstaller"
+echo "Voca Uninstaller"
 echo "===================================="
 echo
 
 # Detect installation type
-if [ -d "/opt/voicebox" ] && [ "$EUID" -eq 0 ]; then
-    INSTALL_DIR="/opt/voicebox"
+if [ -d "/opt/voca" ] && [ "$EUID" -eq 0 ]; then
+    INSTALL_DIR="/opt/voca"
     BIN_DIR="/usr/local/bin"
     DESKTOP_DIR="/usr/share/applications"
-elif [ -d "$HOME/.local/opt/voicebox" ]; then
-    INSTALL_DIR="$HOME/.local/opt/voicebox"
+elif [ -d "$HOME/.local/opt/voca" ]; then
+    INSTALL_DIR="$HOME/.local/opt/voca"
     BIN_DIR="$HOME/.local/bin"
     DESKTOP_DIR="$HOME/.local/share/applications"
 else
-    echo "VoiceBox installation not found."
+    echo "Voca installation not found."
     exit 1
 fi
 
-CONFIG_DIR="$HOME/.config/VoiceBox"
+CONFIG_DIR="$HOME/.config/Voca"
 
-echo "This will uninstall VoiceBox from your system."
+echo "This will uninstall Voca from your system."
 read -p "Are you sure? (y/N): " CONFIRM
 if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
     exit 0
@@ -475,15 +475,15 @@ if [ -d "$INSTALL_DIR" ]; then
 fi
 
 # Remove symlink
-if [ -L "$BIN_DIR/voicebox" ]; then
+if [ -L "$BIN_DIR/voca" ]; then
     echo "Removing command line link..."
-    rm "$BIN_DIR/voicebox"
+    rm "$BIN_DIR/voca"
 fi
 
 # Remove desktop entry
-if [ -f "$DESKTOP_DIR/voicebox.desktop" ]; then
+if [ -f "$DESKTOP_DIR/voca.desktop" ]; then
     echo "Removing desktop entry..."
-    rm "$DESKTOP_DIR/voicebox.desktop"
+    rm "$DESKTOP_DIR/voca.desktop"
     
     # Update desktop database if available
     if command -v update-desktop-database >/dev/null 2>&1; then
@@ -502,7 +502,7 @@ if [ -d "$CONFIG_DIR" ]; then
 fi
 
 echo
-echo "VoiceBox has been uninstalled."
+echo "Voca has been uninstalled."
 """)
         uninstall_script.chmod(0o755)
     
@@ -514,7 +514,7 @@ echo "VoiceBox has been uninstalled."
         
         print("\n📦 Creating Debian Package...")
         
-        deb_name = f"voicebox_{self.version}_{self.platform_info['arch']}"
+        deb_name = f"voca_{self.version}_{self.platform_info['arch']}"
         deb_dir = self.dist_dir / deb_name
         
         # Clean and create package structure
@@ -527,21 +527,21 @@ echo "VoiceBox has been uninstalled."
         (deb_dir / "usr" / "share" / "applications").mkdir(parents=True)
         
         # Copy executable
-        exe_path = self.dist_dir / "voicebox"
+        exe_path = self.dist_dir / "voca"
         if not exe_path.exists():
             print("❌ Executable not found. Run 'make build' first.")
             return False
         
-        shutil.copy2(exe_path, deb_dir / "usr" / "local" / "bin" / "voicebox")
+        shutil.copy2(exe_path, deb_dir / "usr" / "local" / "bin" / "voca")
         
         # Create control file
         control = deb_dir / "DEBIAN" / "control"
-        control.write_text(f"""Package: voicebox
+        control.write_text(f"""Package: voca
 Version: {self.version}
 Section: utils
 Priority: optional
 Architecture: {self.platform_info['arch']}
-Maintainer: VoiceBox Team
+Maintainer: Voca Team
 Description: Voice-to-Text Transcription Tool
  A cross-platform voice-to-text transcription application
  that allows users to quickly transcribe speech using
@@ -549,13 +549,13 @@ Description: Voice-to-Text Transcription Tool
 """)
         
         # Create desktop entry
-        desktop = deb_dir / "usr" / "share" / "applications" / "voicebox.desktop"
+        desktop = deb_dir / "usr" / "share" / "applications" / "voca.desktop"
         desktop.write_text("""[Desktop Entry]
 Version=1.0
 Type=Application
-Name=VoiceBox
+Name=Voca
 Comment=Voice-to-Text Transcription Tool
-Exec=/usr/local/bin/voicebox
+Exec=/usr/local/bin/voca
 Icon=audio-input-microphone
 Terminal=true
 Categories=Utility;AudioVideo;
@@ -627,7 +627,7 @@ Categories=Utility;AudioVideo;
 
 def main():
     """Main entry point for packaging script."""
-    packager = VoiceBoxPackager()
+    packager = VocaPackager()
     
     if len(sys.argv) > 1:
         if sys.argv[1] == "portable":

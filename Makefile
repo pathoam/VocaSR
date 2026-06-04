@@ -1,15 +1,15 @@
-# VoiceBox Build Makefile
+# Voca Build Makefile
 
 .PHONY: help install dev build clean test run package package-all package-portable package-installer package-deb release
 
 # Default target
 help:
-	@echo "VoiceBox Build Commands:"
+	@echo "Voca Build Commands:"
 	@echo "========================"
 	@echo "Development:"
 	@echo "  install          - Install dependencies with uv"
 	@echo "  dev              - Install with development dependencies"
-	@echo "  run              - Run VoiceBox from source"
+	@echo "  run              - Run Voca from source"
 	@echo "  test             - Test the application"
 	@echo "  clean            - Clean build artifacts"
 	@echo ""
@@ -33,17 +33,17 @@ help:
 install:
 	uv sync --no-dev
 
-# Install with development dependencies  
+# Install with development dependencies
 dev:
 	uv sync
 
 # Run from source
 run:
-	uv run python src/main.py
+	uv run python voca/main.py
 
 # Test the application
 test:
-	uv run python src/main.py --test
+	uv run python voca/main.py --test
 
 # Build executable
 build:
@@ -61,18 +61,18 @@ dist: clean build
 	@echo "Creating distribution package..."
 	@system=$$(uname -s | tr '[:upper:]' '[:lower:]'); \
 	arch=$$(uname -m); \
-	dist_name="voicebox-$${system}-$${arch}"; \
+	dist_name="voca-$${system}-$${arch}"; \
 	if [ -d "dist/$$dist_name" ]; then \
 		cd dist && tar -czf "$$dist_name.tar.gz" "$$dist_name/" && \
-		echo "✓ Distribution created: dist/$$dist_name.tar.gz"; \
+		echo "Distribution created: dist/$$dist_name.tar.gz"; \
 	else \
-		echo "❌ Distribution directory not found"; \
+		echo "Distribution directory not found"; \
 	fi
 
 # Quick development setup
 setup: dev
-	@echo "✓ Development environment ready!"
-	@echo "Run 'make run' to start VoiceBox"
+	@echo "Development environment ready!"
+	@echo "Run 'make run' to start Voca"
 
 # Packaging commands
 package: package-all
@@ -97,7 +97,7 @@ package-deb: build
 release: clean build package-all
 	@echo ""
 	@echo "════════════════════════════════════════════"
-	@echo "✅ Release build complete!"
+	@echo "Release build complete!"
 	@echo "════════════════════════════════════════════"
 	@echo "Packages created in dist/"
 	@echo ""

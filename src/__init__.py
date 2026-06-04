@@ -1,1 +1,0 @@
-# VoiceBox - Voice-to-Text Transcription Tool

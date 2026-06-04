@@ -13,7 +13,7 @@ signal.signal(signal.SIGINT, signal.SIG_DFL)
 app = QApplication(sys.argv)
 
 window = QMainWindow()
-window.setWindowTitle("VoiceBox Test")
+window.setWindowTitle("Voca Test")
 window.setGeometry(100, 100, 300, 200)
 label = QLabel("If you see this, PyQt6 is working!", window)
 label.setGeometry(50, 50, 200, 50)
