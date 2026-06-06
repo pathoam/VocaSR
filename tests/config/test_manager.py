@@ -136,6 +136,19 @@ class TestGetters:
         assert qc["model_size"] == "1.7B"
         assert qc["backend"] == "gpu"
 
+    def test_get_qwen_config_reflects_vllm_quantization(self, make_manager):
+        cm = make_manager()
+        cm.set_setting("vllm_quantization", "fp8")
+        qc = cm.get_qwen_config()
+        assert qc["quantization"] == "fp8"
+
+    def test_get_qwen_config_accepts_legacy_qwen_quantization(self, make_manager):
+        cm = make_manager({
+            "qwen_quantization": "awq",
+        })
+        qc = cm.get_qwen_config()
+        assert qc["quantization"] == "awq"
+
     def test_get_command_mode_config(self, make_manager):
         cm = make_manager()
         cmd = cm.get_command_mode_config()

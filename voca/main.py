@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 
 import sys
+
+if "--serve-only" in sys.argv:
+    from voca.service import main as service_main
+
+    service_main()
+    raise SystemExit
+
 import time
 import threading
 from typing import Optional
@@ -539,36 +546,15 @@ def _setup_signal_handlers():
 
 
 def _init_qwen_service(config_manager):
-    """Initialize a QwenASRService from config for the API server."""
-    from voca.transcription.qwen_asr import QwenASRService
-    from voca.text.vocabulary import VocabularyManager
+    from voca.service import init_qwen_service
 
-    qwen_config = config_manager.get_qwen_config()
-    language = config_manager.get_transcription_language()
-    vocab = VocabularyManager(config_manager.config_dir)
-    context = vocab.get_context_string()
-
-    service = QwenASRService(
-        model_size=qwen_config["model_size"],
-        backend=qwen_config["backend"],
-        language=language,
-        kv_cache_mb=config_manager.get_setting("vllm_kv_cache_mb", 256),
-        context=context,
-    )
-    print("Loading Qwen ASR model (may download on first run)...")
-    service._load_model()
-    print("Qwen ASR model loaded.")
-    return service
+    return init_qwen_service(config_manager)
 
 
 def _start_api_server_only(config_manager):
-    from voca.api.server import configure, run_server
-    service = _init_qwen_service(config_manager)
-    port = config_manager.get_setting("api_port", 9876)
-    max_streams = config_manager.get_setting("api_max_streams", 8)
-    configure(service, max_streams=max_streams)
-    print(f"Starting API server on http://127.0.0.1:{port}")
-    run_server(host="127.0.0.1", port=port)
+    from voca.service import start_api_server_only
+
+    start_api_server_only(config_manager)
 
 
 def _start_api_daemon(app, config_manager):

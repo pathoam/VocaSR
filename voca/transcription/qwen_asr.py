@@ -695,5 +695,5 @@ def _create_qwen_service(config_manager, vocab_context):
         language=language,
         kv_cache_mb=config_manager.get_setting("vllm_kv_cache_mb", 256),
         context=vocab_context,
-        quantization=config_manager.get_setting("qwen_quantization", None),
+        quantization=qwen_config.get("quantization"),
     )

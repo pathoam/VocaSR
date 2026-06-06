@@ -26,6 +26,7 @@ class ConfigManager:
         "qwen_backend": "auto",             # "auto" or "gpu"
         "qwen_streaming_enabled": True,     # Enable streaming during recording
         "vllm_kv_cache_mb": 256,             # vLLM KV cache size in MB (256 for personal, 2048+ for server)
+        "vllm_quantization": None,           # vLLM weight quantization: None, "fp8", "awq", or "gptq"
         "api_port": 9876,                    # Local API server port
         "api_max_streams": 8,                # Max concurrent WebSocket streams
         "training_data_enabled": True,       # Collect training data (audio + transcripts)
@@ -239,11 +240,15 @@ class ConfigManager:
 
     def get_qwen_config(self) -> dict:
         """Get Qwen ASR configuration."""
+        quantization = self.config.get("vllm_quantization")
+        if quantization is None:
+            quantization = self.config.get("qwen_quantization")
         return {
             "model_size": self.config.get("qwen_model_size", "0.6B"),
             "backend": self.config.get("qwen_backend", "auto"),
             "streaming_enabled": self.config.get("qwen_streaming_enabled", True),
             "kv_cache_mb": self.config.get("vllm_kv_cache_mb", 256),
+            "quantization": quantization,
         }
 
     def get_command_mode_config(self) -> dict:
