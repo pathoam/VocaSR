@@ -21,11 +21,16 @@ logger = get_logger(__name__)
 # Configuration
 # ---------------------------------------------------------------------------
 
-AUTH_ENABLED = os.environ.get("VOICEBOX_AUTH_ENABLED", "").lower() in ("true", "1", "yes")
-GATEWAY_URL = os.environ.get("VOICEBOX_GATEWAY_URL", "http://localhost:8400")
-GATEWAY_INTERNAL_TOKEN = os.environ.get("VOICEBOX_GATEWAY_INTERNAL_TOKEN", "")
-TOKEN_CACHE_TTL = int(os.environ.get("VOICEBOX_TOKEN_CACHE_TTL", "300"))
-MAX_STREAMS_PER_USER = int(os.environ.get("VOICEBOX_MAX_STREAMS_PER_USER", "4"))
+def _env(name: str, default: str = "") -> str:
+    """Read Voca env names first, with VoiceBox aliases for compatibility."""
+    return os.environ.get(f"VOCA_{name}") or os.environ.get(f"VOICEBOX_{name}", default)
+
+
+AUTH_ENABLED = _env("AUTH_ENABLED").lower() in ("true", "1", "yes")
+GATEWAY_URL = _env("GATEWAY_URL", "http://localhost:8400")
+GATEWAY_INTERNAL_TOKEN = _env("GATEWAY_INTERNAL_TOKEN")
+TOKEN_CACHE_TTL = int(_env("TOKEN_CACHE_TTL", "300"))
+MAX_STREAMS_PER_USER = int(_env("MAX_STREAMS_PER_USER", "4"))
 
 # ---------------------------------------------------------------------------
 # Types
