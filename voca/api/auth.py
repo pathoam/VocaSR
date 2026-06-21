@@ -1,8 +1,9 @@
 """Auth middleware for managed Voca (multi-tenant mode).
 
-When VOICEBOX_AUTH_ENABLED=true, all endpoints except /v1/status require
-a valid token. Tokens are validated against the gateway's internal API
-and cached for a configurable TTL.
+When VOCA_AUTH_ENABLED=true, all endpoints except /v1/status require
+a valid token. Standalone Voca deployments can validate static bearer tokens
+with VOCA_AUTH_TOKEN/VOCA_AUTH_TOKENS. Optagon-managed deployments can
+optionally validate tokens against the gateway's internal API.
 """
 
 import asyncio
@@ -27,10 +28,32 @@ def _env(name: str, default: str = "") -> str:
 
 
 AUTH_ENABLED = _env("AUTH_ENABLED").lower() in ("true", "1", "yes")
+AUTH_MODE = _env("AUTH_MODE", "auto").lower()
+AUTH_TOKEN = _env("AUTH_TOKEN")
+AUTH_TOKENS = _env("AUTH_TOKENS")
 GATEWAY_URL = _env("GATEWAY_URL", "http://localhost:8400")
 GATEWAY_INTERNAL_TOKEN = _env("GATEWAY_INTERNAL_TOKEN")
 TOKEN_CACHE_TTL = int(_env("TOKEN_CACHE_TTL", "300"))
 MAX_STREAMS_PER_USER = int(_env("MAX_STREAMS_PER_USER", "4"))
+
+
+def _static_tokens() -> set[str]:
+    tokens = set()
+    if AUTH_TOKEN:
+        tokens.add(AUTH_TOKEN)
+    if AUTH_TOKENS:
+        tokens.update(t.strip() for t in AUTH_TOKENS.split(",") if t.strip())
+    return tokens
+
+
+def _should_use_static_tokens() -> bool:
+    return AUTH_MODE in ("auto", "token", "static") and bool(_static_tokens())
+
+
+def _should_use_gateway() -> bool:
+    if AUTH_MODE in ("gateway", "optagon"):
+        return True
+    return AUTH_MODE == "auto" and not _static_tokens()
 
 # ---------------------------------------------------------------------------
 # Types
@@ -127,6 +150,14 @@ async def validate_token(token: str, frame_id: Optional[str] = None) -> AuthResu
 
     if not token:
         return AuthResult(ok=False, error="Missing authorization token")
+
+    if _should_use_static_tokens():
+        if token in _static_tokens():
+            return AuthResult(ok=True, user_id="token", token_type="token")
+        return AuthResult(ok=False, error="TOKEN_INVALID")
+
+    if not _should_use_gateway():
+        return AuthResult(ok=False, error="No token validator configured")
 
     # Check cache first
     cached = await _get_cached(token, frame_id)
