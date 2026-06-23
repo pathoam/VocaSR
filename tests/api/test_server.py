@@ -89,10 +89,12 @@ def _reset_server_state():
     old_service = server_module._service
     old_max = server_module._max_streams
     old_sem = server_module._transcribe_semaphore
+    old_number_normalizer = server_module._number_normalizer
     server_module._app = None
     server_module._service = None
     server_module._transcribe_semaphore = None
     server_module._max_streams = 8
+    server_module._number_normalizer = server_module.NumberNormalizationStage()
     with server_module._sessions_lock:
         server_module._sessions.clear()
     yield
@@ -100,6 +102,7 @@ def _reset_server_state():
     server_module._service = old_service
     server_module._max_streams = old_max
     server_module._transcribe_semaphore = old_sem
+    server_module._number_normalizer = old_number_normalizer
 
 
 @pytest.fixture
@@ -192,6 +195,22 @@ class TestContextHelpers:
             ["Optagon", "Voca"],
         ) == "Open Optagon and start Voca"
 
+    def test_postprocess_transcript_normalizes_numbers(self):
+        assert (
+            server_module._postprocess_transcript("I need six items", None)
+            == "I need 6 items"
+        )
+
+    def test_postprocess_transcript_can_disable_number_normalization(self, fake_service):
+        server_module.configure(
+            fake_service,
+            number_normalization_enabled=False,
+        )
+        assert (
+            server_module._postprocess_transcript("I need six items", None)
+            == "I need six items"
+        )
+
 
 # ---------------------------------------------------------------
 # /v1/status
@@ -268,6 +287,17 @@ class TestTranscribeEndpoint:
         assert resp.status_code == 200
         assert len(calls) == 1
         assert "formal tone" in calls[0]
+
+    @patch("voca.api.auth.AUTH_ENABLED", False)
+    def test_transcribe_normalizes_final_text(self, client, fake_service):
+        fake_service.transcribe = lambda path, context=None: "I need six items"
+        wav = _make_wav_bytes()
+        resp = client.post(
+            "/v1/transcribe",
+            files={"file": ("test.wav", wav, "audio/wav")},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["text"] == "I need 6 items"
 
 
 # ---------------------------------------------------------------

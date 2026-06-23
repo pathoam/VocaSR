@@ -561,12 +561,17 @@ def _start_api_daemon(app, config_manager):
     from voca.api.server import configure, start_server
     port = config_manager.get_setting("api_port", 9876)
     max_streams = config_manager.get_setting("api_max_streams", 8)
+    number_norm = config_manager.get_setting("number_normalization_enabled", True)
     original_start = app.start
 
     def _patched_start():
         result = original_start()
         if result and app.transcription_service:
-            configure(app.transcription_service, max_streams=max_streams)
+            configure(
+                app.transcription_service,
+                max_streams=max_streams,
+                number_normalization_enabled=number_norm,
+            )
             start_server(host="127.0.0.1", port=port, daemon=True)
             print(f"API server running on http://127.0.0.1:{port}")
         return result
@@ -579,7 +584,12 @@ def _start_api_headless_for_gui(config_manager):
     service = _init_qwen_service(config_manager)
     port = config_manager.get_setting("api_port", 9876)
     max_streams = config_manager.get_setting("api_max_streams", 8)
-    configure(service, max_streams=max_streams)
+    number_norm = config_manager.get_setting("number_normalization_enabled", True)
+    configure(
+        service,
+        max_streams=max_streams,
+        number_normalization_enabled=number_norm,
+    )
     start_server(host="127.0.0.1", port=port, daemon=True)
     print(f"API server running on http://127.0.0.1:{port}")
 

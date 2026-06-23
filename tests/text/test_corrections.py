@@ -206,10 +206,30 @@ class TestNumberNormalizationStage:
         assert result.corrections == []
 
     def test_standalone_zero_not_converted(self):
-        """A single word 'zero' is not converted (needs 2+ words)."""
+        """Small standalone number words are preserved."""
         stage = NumberNormalizationStage()
         result = stage.apply("zero")
         assert result.text == "zero"
+
+    def test_standalone_five_not_converted(self):
+        stage = NumberNormalizationStage()
+        result = stage.apply("I need five items")
+        assert result.text == "I need five items"
+
+    def test_standalone_six_converted(self):
+        stage = NumberNormalizationStage()
+        result = stage.apply("I need six items")
+        assert result.text == "I need 6 items"
+
+    def test_standalone_ten_converted_with_punctuation(self):
+        stage = NumberNormalizationStage()
+        result = stage.apply("There are ten.")
+        assert result.text == "There are 10."
+
+    def test_custom_small_number_threshold(self):
+        stage = NumberNormalizationStage(preserve_words_up_to=2)
+        result = stage.apply("I need three items")
+        assert result.text == "I need 3 items"
 
     def test_compound_with_zero(self):
         """'five hundred' is compound and converts."""

@@ -349,8 +349,9 @@ class NumberNormalizationStage(CorrectionStage):
     # Pattern to match compound numbers like "twenty three" or "four point nine"
     _NUM_WORDS = set(list(_ONES.keys()) + list(_TENS.keys()) + list(_SCALES.keys()) + ["point", "and"])
 
-    def __init__(self, enabled: bool = True):
+    def __init__(self, enabled: bool = True, preserve_words_up_to: int = 5):
         self.enabled = enabled
+        self.preserve_words_up_to = preserve_words_up_to
 
     def apply(self, text: str) -> CorrectionResult:
         if not self.enabled or not text:
@@ -376,8 +377,9 @@ class NumberNormalizationStage(CorrectionStage):
                     else:
                         break
 
-                # Only convert if it's a compound (2+ words) or a decimal
-                if len(num_words) >= 2:
+                # Convert compound/decimal numbers and standalone numbers above
+                # the configured small-number threshold.
+                if len(num_words) >= 2 or self._should_convert_single_word(num_words[0]):
                     original = " ".join(words[i:j])
                     number_str = self._words_to_number(num_words)
                     if number_str is not None:
@@ -399,6 +401,10 @@ class NumberNormalizationStage(CorrectionStage):
                         result_words.append(number_str + trailing)
                         i = j
                         continue
+                    if len(num_words) >= 2:
+                        result_words.extend(words[i:j])
+                        i = j
+                        continue
 
             result_words.append(words[i])
             i += 1
@@ -407,6 +413,12 @@ class NumberNormalizationStage(CorrectionStage):
             text=" ".join(result_words),
             corrections=corrections,
         )
+
+    def _should_convert_single_word(self, word: str) -> bool:
+        if word not in self._ONES and word not in self._TENS:
+            return False
+        value = self._ONES.get(word, self._TENS.get(word))
+        return value is not None and value > self.preserve_words_up_to
 
     def _words_to_number(self, words: List[str]) -> Optional[str]:
         """Convert a list of number words to a digit string. Returns None on failure."""

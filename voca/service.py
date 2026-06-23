@@ -42,6 +42,15 @@ def _first_env(names: Iterable[str]) -> str | None:
     return None
 
 
+def _parse_bool(value: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"Invalid boolean value: {value}")
+
+
 def _setting(
     config_manager: ConfigManager,
     env_names: Iterable[str],
@@ -105,7 +114,18 @@ def start_api_server_only(config_manager: ConfigManager) -> None:
         8,
         int,
     )
-    configure(service, max_streams=max_streams)
+    number_norm = _setting(
+        config_manager,
+        ("VOCA_NUMBER_NORMALIZATION_ENABLED", "VOICEBOX_NUMBER_NORMALIZATION_ENABLED"),
+        "number_normalization_enabled",
+        True,
+        _parse_bool,
+    )
+    configure(
+        service,
+        max_streams=max_streams,
+        number_normalization_enabled=number_norm,
+    )
     print(f"Starting API server on http://{host}:{port}")
     run_server(host=host, port=port)
 
