@@ -168,6 +168,30 @@ class TestContextHelpers:
     def test_resolve_context_both_none(self):
         assert server_module._resolve_context(None, None) is None
 
+    def test_context_only_filter_preserves_single_term(self):
+        assert server_module._filter_context_only_transcript(
+            "Optagon",
+            ["Optagon", "Voca"],
+        ) == "Optagon"
+
+    def test_context_only_filter_removes_list_of_terms(self):
+        assert server_module._filter_context_only_transcript(
+            "Optagon, Voca, Qwen",
+            ["Optagon", "Voca", "Qwen"],
+        ) == ""
+
+    def test_context_only_filter_removes_literal_context_prompt(self):
+        assert server_module._filter_context_only_transcript(
+            "The following terms may appear in the audio: Optagon, Voca.",
+            ["Optagon", "Voca"],
+        ) == ""
+
+    def test_context_only_filter_preserves_real_sentence_with_terms(self):
+        assert server_module._filter_context_only_transcript(
+            "Open Optagon and start Voca",
+            ["Optagon", "Voca"],
+        ) == "Open Optagon and start Voca"
+
 
 # ---------------------------------------------------------------
 # /v1/status

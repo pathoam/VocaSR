@@ -6,6 +6,7 @@ required) modes. Set VOICEBOX_AUTH_ENABLED=true to enable token validation.
 
 import asyncio
 import json
+import re
 import tempfile
 import time
 import threading
@@ -79,6 +80,58 @@ def _resolve_context(context: Optional[str], context_terms) -> Optional[str]:
     if not parts:
         return None
     return "\n\n".join(parts)
+
+
+def _normalize_asr_text(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
+def _is_context_only_transcript(text: str, context_terms) -> bool:
+    """Detect no-speech hallucinations that just repeat context vocabulary.
+
+    A single context term is allowed so saying "Optagon" still works. We only
+    suppress list-like output containing two or more context terms and no other
+    words, or the literal vocabulary prompt plus such a list.
+    """
+    terms = _parse_context_terms(context_terms)
+    if not terms:
+        return False
+
+    normalized_terms = {
+        _normalize_asr_text(str(term))
+        for term in terms
+        if _normalize_asr_text(str(term))
+    }
+    if len(normalized_terms) < 2:
+        return False
+
+    stripped = re.sub(
+        r"^\s*(?:the\s+following\s+terms\s+may\s+appear\s+in\s+the\s+audio|the\s+following\s+terms\s+may\s+appear)\s*:?\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    parts = [
+        _normalize_asr_text(part)
+        for part in re.split(r"[,;\n]|\s+\band\b\s+", stripped)
+    ]
+    parts = [part for part in parts if part]
+
+    if len(parts) >= 2 and all(part in normalized_terms for part in parts):
+        return True
+
+    normalized_text = _normalize_asr_text(stripped)
+    matched_terms = [term for term in normalized_terms if re.search(rf"\b{re.escape(term)}\b", normalized_text)]
+    if len(matched_terms) < 2:
+        return False
+    without_terms = normalized_text
+    for term in sorted(matched_terms, key=len, reverse=True):
+        without_terms = re.sub(rf"\b{re.escape(term)}\b", " ", without_terms)
+    return _normalize_asr_text(without_terms) == ""
+
+
+def _filter_context_only_transcript(text: str, context_terms) -> str:
+    return "" if _is_context_only_transcript(text, context_terms) else text
 
 
 def _get_app():
@@ -210,6 +263,7 @@ def _get_app():
                 text = await loop.run_in_executor(
                     None, _service.transcribe, tmp_path, request_context
                 )
+                text = _filter_context_only_transcript(text, context_terms)
                 elapsed = time.monotonic() - start
                 return {
                     "text": text,
@@ -325,6 +379,10 @@ def _get_app():
                                 None,
                                 _service.finish_streaming_session,
                                 session_id,
+                            )
+                            text = _filter_context_only_transcript(
+                                text,
+                                config.get("context_terms", config.get("contextTerms", None)),
                             )
                             await ws.send_json({"text": text, "final": True})
                             break
