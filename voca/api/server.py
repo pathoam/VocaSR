@@ -10,6 +10,7 @@ import re
 import tempfile
 import time
 import threading
+from pathlib import Path
 from typing import Dict, Optional
 
 import numpy as np
@@ -23,7 +24,7 @@ from voca.api.auth import (
     release_stream,
     AuthResult,
 )
-from voca.text.corrections import NumberNormalizationStage
+from voca.text.corrections import NumberNormalizationStage, TermReplacementStage
 
 logger = get_logger(__name__)
 
@@ -33,6 +34,7 @@ _service = None  # QwenASRService instance shared with desktop app
 _max_streams: int = 8
 _transcribe_semaphore: Optional[asyncio.Semaphore] = None
 _number_normalizer = NumberNormalizationStage()
+_term_replacer: Optional[TermReplacementStage] = None
 
 # Session tracking for WebSocket streams
 _sessions: Dict[str, dict] = {}  # session_id -> {"last_active": float}
@@ -138,6 +140,8 @@ def _filter_context_only_transcript(text: str, context_terms) -> str:
 
 def _postprocess_transcript(text: str, context_terms) -> str:
     text = _filter_context_only_transcript(text, context_terms)
+    if _term_replacer is not None:
+        text = _term_replacer.apply(text).text
     return _number_normalizer.apply(text).text
 
 
@@ -423,12 +427,14 @@ def configure(
     service,
     max_streams: int = 8,
     number_normalization_enabled: bool = True,
+    config_dir: Optional[Path] = None,
 ) -> None:
     """Inject the shared QwenASRService and settings."""
-    global _service, _max_streams, _number_normalizer
+    global _service, _max_streams, _number_normalizer, _term_replacer
     _service = service
     _max_streams = max_streams
     _number_normalizer = NumberNormalizationStage(enabled=number_normalization_enabled)
+    _term_replacer = TermReplacementStage(config_dir) if config_dir is not None else None
 
 
 def start_server(host: str = "127.0.0.1", port: int = 9876, daemon: bool = True) -> threading.Thread:

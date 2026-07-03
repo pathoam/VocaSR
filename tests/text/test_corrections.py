@@ -29,7 +29,22 @@ class TestTermReplacementStage:
     def test_voice_box_to_voca(self, tmp_config_dir):
         stage = TermReplacementStage(tmp_config_dir)
         result = stage.apply("open voice box settings")
-        assert "voca" in result.text
+        assert "Voca" in result.text
+
+    def test_optagon_defaults_apply(self, tmp_config_dir):
+        stage = TermReplacementStage(tmp_config_dir)
+        result = stage.apply("open optigon in the frame")
+        assert result.text == "open Optagon in the frame"
+
+    def test_qwen_defaults_apply(self, tmp_config_dir):
+        stage = TermReplacementStage(tmp_config_dir)
+        result = stage.apply("start quinn asr")
+        assert result.text == "start Qwen ASR"
+
+    def test_default_name_correction_applies(self, tmp_config_dir):
+        stage = TermReplacementStage(tmp_config_dir)
+        result = stage.apply("send this to glen")
+        assert result.text == "send this to Glenn"
 
     def test_case_insensitive_matching(self, tmp_config_dir):
         stage = TermReplacementStage(tmp_config_dir)

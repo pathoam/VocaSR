@@ -90,11 +90,13 @@ def _reset_server_state():
     old_max = server_module._max_streams
     old_sem = server_module._transcribe_semaphore
     old_number_normalizer = server_module._number_normalizer
+    old_term_replacer = server_module._term_replacer
     server_module._app = None
     server_module._service = None
     server_module._transcribe_semaphore = None
     server_module._max_streams = 8
     server_module._number_normalizer = server_module.NumberNormalizationStage()
+    server_module._term_replacer = None
     with server_module._sessions_lock:
         server_module._sessions.clear()
     yield
@@ -103,6 +105,7 @@ def _reset_server_state():
     server_module._max_streams = old_max
     server_module._transcribe_semaphore = old_sem
     server_module._number_normalizer = old_number_normalizer
+    server_module._term_replacer = old_term_replacer
 
 
 @pytest.fixture
@@ -211,6 +214,20 @@ class TestContextHelpers:
             == "I need six items"
         )
 
+    def test_postprocess_transcript_applies_term_replacements(
+        self,
+        fake_service,
+        tmp_config_dir,
+    ):
+        server_module.configure(
+            fake_service,
+            config_dir=tmp_config_dir,
+        )
+        assert (
+            server_module._postprocess_transcript("open optigon with quinn asr", None)
+            == "open Optagon with Qwen ASR"
+        )
+
 
 # ---------------------------------------------------------------
 # /v1/status
@@ -298,6 +315,27 @@ class TestTranscribeEndpoint:
         )
         assert resp.status_code == 200
         assert resp.json()["text"] == "I need 6 items"
+
+    @patch("voca.api.auth.AUTH_ENABLED", False)
+    def test_transcribe_applies_term_replacements(
+        self,
+        fake_service,
+        tmp_config_dir,
+    ):
+        from fastapi.testclient import TestClient
+
+        server_module.configure(fake_service, max_streams=4, config_dir=tmp_config_dir)
+        app = server_module._get_app()
+        client = TestClient(app)
+
+        fake_service.transcribe = lambda path, context=None: "open optigon"
+        wav = _make_wav_bytes()
+        resp = client.post(
+            "/v1/transcribe",
+            files={"file": ("test.wav", wav, "audio/wav")},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["text"] == "open Optagon"
 
 
 # ---------------------------------------------------------------

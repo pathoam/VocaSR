@@ -50,9 +50,29 @@ class TermReplacementStage(CorrectionStage):
 
     DEFAULT_CORRECTIONS = {
         # Command triggers - normalize variations
-        "voice box": "voca",
-        "voice-box": "voca",
-        "voicebox": "voca",
+        "voice box": "Voca",
+        "voice-box": "Voca",
+        "voicebox": "Voca",
+        # Optagon / Voca terms commonly misheard by general ASR models
+        "octagon": "Optagon",
+        "optigon": "Optagon",
+        "opticon": "Optagon",
+        "optagon": "Optagon",
+        "optigan": "Optagon",
+        "opti gone": "Optagon",
+        "opti gon": "Optagon",
+        "voca": "Voca",
+        "voka": "Voca",
+        "voca sr": "VocaSR",
+        "voca s r": "VocaSR",
+        "voice box sr": "VocaSR",
+        "quinn": "Qwen",
+        "quin": "Qwen",
+        "q when": "Qwen",
+        "qwen": "Qwen",
+        "qwen asr": "Qwen ASR",
+        "quinn asr": "Qwen ASR",
+        "glen": "Glenn",
         # Common tech brand names
         "superbase": "Supabase",
         "super base": "Supabase",

@@ -125,6 +125,7 @@ def start_api_server_only(config_manager: ConfigManager) -> None:
         service,
         max_streams=max_streams,
         number_normalization_enabled=number_norm,
+        config_dir=config_manager.config_dir,
     )
     print(f"Starting API server on http://{host}:{port}")
     run_server(host=host, port=port)

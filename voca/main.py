@@ -571,6 +571,7 @@ def _start_api_daemon(app, config_manager):
                 app.transcription_service,
                 max_streams=max_streams,
                 number_normalization_enabled=number_norm,
+                config_dir=config_manager.config_dir,
             )
             start_server(host="127.0.0.1", port=port, daemon=True)
             print(f"API server running on http://127.0.0.1:{port}")
@@ -589,6 +590,7 @@ def _start_api_headless_for_gui(config_manager):
         service,
         max_streams=max_streams,
         number_normalization_enabled=number_norm,
+        config_dir=config_manager.config_dir,
     )
     start_server(host="127.0.0.1", port=port, daemon=True)
     print(f"API server running on http://127.0.0.1:{port}")
