@@ -6,12 +6,67 @@ import threading
 from voca.utils.logging import get_logger
 
 
-_BARE_MODIFIER_MAP = {
-    "ctrl": keyboard.Key.ctrl_l,
-    "alt": keyboard.Key.alt_l,
-    "shift": keyboard.Key.shift,
-    "super": keyboard.Key.cmd,
-}
+CAPTURING_TRIGGER = threading.Event()
+MODIFIERS = {"ctrl", "alt", "shift", "super", "fn"}
+# Linux exposes KEY_FN under this XKB keysym when it has a mapping.
+FN_KEYSYM = 0x100811D0
+
+
+class TriggerMatcher:
+    """Track physical keys, then match their normalized names."""
+
+    def __init__(self, names, mode, start, finish=None, cancel=None):
+        self.names = frozenset(names)
+        self.mode = mode
+        self.release_toggle = mode == "toggle" and self.names <= MODIFIERS
+        self.start, self.finish, self.cancel = start, finish, cancel
+        self.down = {}
+        self.armed = False
+        self.blocked = False
+
+    def event(self, physical, name, pressed):
+        if pressed:
+            if physical in self.down:
+                return
+            self.down[physical] = name
+        else:
+            if physical not in self.down:
+                return
+            del self.down[physical]
+        held = set(self.down.values())
+        trigger_held = held & self.names
+        if CAPTURING_TRIGGER.is_set():
+            if self.armed and self.mode == "hold":
+                self.cancel()
+            self.armed = False
+            self.blocked = bool(trigger_held)
+            return
+        if trigger_held and held - self.names and not self.armed:
+            self.blocked = True
+        if self.armed and held - self.names:
+            if self.mode == "hold":
+                self.cancel()
+            self.armed = False
+            self.blocked = True
+        if self.armed and self.mode == "hold" and held != self.names:
+            self.armed = False
+            self.blocked = True
+            self.finish()
+        if not trigger_held:
+            if self.armed and self.release_toggle:
+                self.start()
+            self.armed = self.blocked = False
+        elif pressed and not self.armed and not self.blocked and held == self.names:
+            self.armed = True
+            if not self.release_toggle:
+                self.start()
+
+    def reset(self):
+        if self.armed and self.mode == "hold":
+            self.cancel()
+        self.armed = False
+        self.down.clear()
+
 
 # Also match right-side variants
 _MODIFIER_VARIANTS = {
@@ -29,10 +84,60 @@ _MODIFIER_VARIANTS = {
 }
 
 
+class PhysicalKeyboardListener(keyboard.Listener):
+    """Use X11 keycodes for identity even if Shift changes the keysym."""
+
+    def __init__(self, dispatch):
+        self.dispatch = dispatch
+        self.pending_release = None
+        self.release_timer = None
+        self.event_lock = threading.Lock()
+        self.xorg = type(self).__mro__[1].__module__.endswith("._xorg")
+        super().__init__(on_press=lambda key, injected=False: self._portable(key, True, injected),
+                         on_release=lambda key, injected=False: self._portable(key, False, injected))
+
+    def _portable(self, key, pressed, injected):
+        if not injected and not self.xorg:
+            self.dispatch(key, pressed)
+
+    def _flush_release(self):
+        if self.pending_release:
+            physical, _, key = self.pending_release
+            self.pending_release = None
+            self.dispatch(key, False, physical)
+
+    def _release_after_repeat_window(self):
+        with self.event_lock:
+            if self.running:
+                self._flush_release()
+
+    def _handle_message(self, display, event, injected):
+        if injected or event.type not in (2, 3):
+            return
+        with self.event_lock:
+            if self.release_timer:
+                self.release_timer.cancel()
+            if event.type == 2 and self.pending_release and self.pending_release[:2] == (event.detail, event.time):
+                self.pending_release = None
+                return
+            self._flush_release()
+            try:
+                key = self._event_to_key(display, event)
+            except IndexError:
+                key = None
+            if event.type == 2:
+                self.dispatch(key, True, event.detail)
+            else:
+                self.pending_release = (event.detail, event.time, key)
+                self.release_timer = threading.Timer(0.008, self._release_after_repeat_window)
+                self.release_timer.daemon = True
+                self.release_timer.start()
+
+
 class HotkeyManager:
     """Cross-platform global hotkey manager supporting keyboard and mouse inputs."""
 
-    def __init__(self, callback: Callable[[], None]):
+    def __init__(self, callback: Callable[[], None], finish=None, cancel=None):
         """
         Initialize hotkey manager.
 
@@ -40,6 +145,10 @@ class HotkeyManager:
             callback: Function to call when hotkey is pressed
         """
         self.callback = callback
+        self.finish = finish or (lambda: None)
+        self.cancel = cancel or (lambda: None)
+        self.mode = 'toggle'
+        self.matchers = []
         self.current_hotkey: Optional[str] = None
         self.keyboard_listener: Optional[Union[keyboard.GlobalHotKeys, keyboard.Listener]] = None
         self._xinput_procs: list[subprocess.Popen] = []
@@ -47,37 +156,69 @@ class HotkeyManager:
         self.is_listening = False
         self._lock = threading.Lock()
         self._is_mouse_hotkey = False
-        self._is_bare_modifier = False
-        self._bare_modifier_name: Optional[str] = None
-        self._other_key_pressed = False
         self._extra_hotkeys: dict = {}  # key_combination -> callback
         self.logger = get_logger(__name__)
 
-    def set_hotkey(self, key_combination: str) -> None:
+    @staticmethod
+    def parse_binding(binding):
+        aliases = {"control": "ctrl", "cmd": "super", "command": "super",
+                   "win": "super", "option": "alt", "esc": "escape", "return": "enter"}
+        parts = binding.lower().replace(" ", "").split("+")
+        names = [aliases.get(part, part) for part in parts]
+        if any(not name for name in names) or len(set(names)) != len(names):
+            raise ValueError("Choose a key or a chord with distinct keys.")
+        for name in names:
+            if name in MODIFIERS or len(name) == 1 or name in keyboard.Key.__members__:
+                continue
+            if len(names) == 1 and re.fullmatch(r"button[0-9]+", name) and int(name[6:]) >= 8:
+                continue
+            raise ValueError(f"Unsupported trigger key: {name}")
+        return names
+
+    def set_hotkey(self, key_combination: str, mode: str = "toggle") -> None:
         """
         Set the hotkey combination.
 
         Args:
             key_combination: Hotkey string like 'ctrl+shift+v', 'f12', or 'button9'
         """
-        # Stop outside the lock to avoid deadlock (stop_listening also acquires _lock)
+        names = self.parse_binding(key_combination)
+        if mode not in {"toggle", "hold"}:
+            raise ValueError("Choose Hold to record or Press to toggle.")
         if self.is_listening:
             self.stop_listening()
-
         with self._lock:
             self.current_hotkey = key_combination
-            self._is_mouse_hotkey = self._is_mouse_button(key_combination)
+            self.mode = mode
+            self._is_mouse_hotkey = self._is_mouse_button(names[0])
+            self.matchers = [TriggerMatcher(names, mode, self._on_hotkey_pressed,
+                                            self.finish, self.cancel)]
+            for combo, callback in self._extra_hotkeys.items():
+                extra = self.parse_binding(combo)
+                if set(extra) != set(names):
+                    self.matchers.append(TriggerMatcher(extra, "toggle", callback))
+            self.keyboard_listener = PhysicalKeyboardListener(self._keyboard_event)
 
-            try:
-                if self._is_mouse_hotkey:
-                    # Set up mouse listener
-                    self._setup_mouse_listener(key_combination)
-                else:
-                    # Set up keyboard listener
-                    self._setup_keyboard_listener(key_combination)
+    def _keyboard_event(self, key, pressed, physical=None):
+        name = _MODIFIER_VARIANTS.get(key)
+        if name is None:
+            if getattr(key, "vk", None) == FN_KEYSYM:
+                name = "fn"
+            else:
+                name = getattr(key, "name", None) or getattr(key, "char", None)
+                if name:
+                    name = name.lower()
+                    if len(name) == 1 and 1 <= ord(name) <= 26:
+                        name = chr(ord(name) + 96)
+        if physical is None:
+            physical = name if isinstance(key, keyboard.KeyCode) and name else getattr(key, "vk", None)
+        if physical is None:
+            physical = name if isinstance(key, keyboard.KeyCode) and name else key
+        self._dispatch(("keyboard", physical), name, pressed)
 
-            except Exception as e:
-                raise ValueError(f"Invalid hotkey combination '{key_combination}': {e}")
+    def _dispatch(self, physical, name, pressed):
+        for matcher in self.matchers:
+            matcher.event(physical, name, pressed)
 
     def start_listening(self) -> None:
         """Start listening for hotkey presses."""
@@ -91,7 +232,7 @@ class HotkeyManager:
             try:
                 if self._is_mouse_hotkey:
                     self._start_xinput_listeners()
-                elif self.keyboard_listener:
+                if self.keyboard_listener:
                     self.keyboard_listener.start()
 
                 self.is_listening = True
@@ -110,6 +251,8 @@ class HotkeyManager:
                     self.keyboard_listener.stop()
                     self.keyboard_listener = None
                 self._stop_xinput_listeners()
+                for matcher in self.matchers:
+                    matcher.reset()
             except Exception as e:
                 self.logger.error(f"Error stopping listener: {e}")
 
@@ -121,61 +264,6 @@ class HotkeyManager:
             self.callback()
         except Exception as e:
             self.logger.error(f"Error in hotkey callback: {e}")
-
-    def _normalize_hotkey(self, key_combination: str) -> str:
-        """
-        Normalize hotkey string for pynput.
-
-        Args:
-            key_combination: Input like 'ctrl+shift+v'
-
-        Returns:
-            Normalized string for pynput
-        """
-        # Convert to lowercase and split
-        parts = key_combination.lower().replace(" ", "").split("+")
-
-        # Map common key names to pynput format
-        key_mapping = {
-            "ctrl": "<ctrl>",
-            "control": "<ctrl>",
-            "shift": "<shift>",
-            "alt": "<alt>",
-            "option": "<alt>",  # macOS
-            "cmd": "<cmd>",  # macOS
-            "command": "<cmd>",  # macOS
-            "win": "<cmd>",  # Windows key
-            "super": "<cmd>",  # Linux super key
-            "space": "<space>",
-            "enter": "<enter>",
-            "return": "<enter>",
-            "tab": "<tab>",
-            "esc": "<esc>",
-            "escape": "<esc>",
-            "backspace": "<backspace>",
-            "delete": "<delete>",
-            "up": "<up>",
-            "down": "<down>",
-            "left": "<left>",
-            "right": "<right>",
-        }
-
-        # Process each part
-        normalized_parts = []
-        for part in parts:
-            if part in key_mapping:
-                normalized_parts.append(key_mapping[part])
-            elif len(part) == 1 and part.isalpha():
-                # Single letter - keep as is
-                normalized_parts.append(part)
-            elif part.startswith("f") and part[1:].isdigit():
-                # Function keys like f1, f12
-                normalized_parts.append(f"<{part}>")
-            else:
-                # Try to keep as is, pynput might understand it
-                normalized_parts.append(part)
-
-        return "+".join(normalized_parts)
 
     def is_hotkey_listening(self) -> bool:
         """Check if currently listening for hotkeys."""
@@ -200,56 +288,6 @@ class HotkeyManager:
         """
         self._extra_hotkeys[key_combination] = callback
 
-    def _setup_keyboard_listener(self, key_combination: str) -> None:
-        """Set up keyboard listener for keyboard hotkeys."""
-        bare_name = key_combination.lower().strip()
-        if bare_name in _BARE_MODIFIER_MAP and "+" not in key_combination:
-            # Bare modifier hotkey: fire only on press-and-release with no
-            # intervening keys (so Ctrl+C etc. won't trigger it).
-            self._is_bare_modifier = True
-            self._bare_modifier_name = bare_name
-            self._other_key_pressed = False
-            self.keyboard_listener = keyboard.Listener(
-                on_press=self._on_bare_mod_press,
-                on_release=self._on_bare_mod_release,
-            )
-            return
-
-        self._is_bare_modifier = False
-        normalized_hotkey = self._normalize_hotkey(key_combination)
-        hotkey_dict = {normalized_hotkey: self._on_hotkey_pressed}
-
-        # Add extra registered hotkeys
-        for combo, cb in self._extra_hotkeys.items():
-            if not self._is_mouse_button(combo):
-                normalized = self._normalize_hotkey(combo)
-                hotkey_dict[normalized] = cb
-
-        self.keyboard_listener = keyboard.GlobalHotKeys(hotkey_dict)
-
-    def _on_bare_mod_press(self, key: Union[keyboard.Key, keyboard.KeyCode]) -> None:
-        """Track whether non-target keys are pressed during a bare modifier hold."""
-        mod_name = _MODIFIER_VARIANTS.get(key)
-        if mod_name == self._bare_modifier_name:
-            # Target modifier pressed, reset the flag
-            self._other_key_pressed = False
-        else:
-            # Any other key pressed while modifier is held
-            self._other_key_pressed = True
-
-    def _on_bare_mod_release(self, key: Union[keyboard.Key, keyboard.KeyCode]) -> None:
-        """Fire the hotkey callback when the bare modifier is released cleanly."""
-        mod_name = _MODIFIER_VARIANTS.get(key)
-        if mod_name == self._bare_modifier_name and not self._other_key_pressed:
-            self._on_hotkey_pressed()
-
-    def _setup_mouse_listener(self, key_combination: str) -> None:
-        """Validate mouse button hotkey format. Actual listeners start in start_listening()."""
-        button_num = int(key_combination[6:])
-        if button_num < 8:
-            raise ValueError(f"Mouse buttons below 8 are not supported as hotkeys (got {button_num})")
-        self._target_button_num = button_num
-
     def _start_xinput_listeners(self) -> None:
         """Spawn xinput test processes on all pointer devices to detect the target button."""
         self._xinput_stop.clear()
@@ -272,19 +310,21 @@ class HotkeyManager:
             )
             self._xinput_procs.append(proc)
             t = threading.Thread(
-                target=self._read_xinput, args=(proc,), daemon=True
+                target=self._read_xinput, args=(proc, dev_id), daemon=True
             )
             t.start()
 
-    def _read_xinput(self, proc: subprocess.Popen) -> None:
+    def _read_xinput(self, proc: subprocess.Popen, device) -> None:
         """Read xinput output and fire callback on target button press."""
         try:
             for line in proc.stdout:
                 if self._xinput_stop.is_set():
                     break
-                m = re.match(r"button press\s+(\d+)", line.strip())
-                if m and int(m.group(1)) == self._target_button_num:
-                    self._on_hotkey_pressed()
+                match = re.fullmatch(r"button (press|release)\s+(\d+)", line.strip())
+                if match:
+                    action, button = match.groups()
+                    if f"button{button}" == self.current_hotkey.lower().strip():
+                        self._dispatch(("mouse", device, button), f"button{button}", action == "press")
         except Exception:
             pass
 

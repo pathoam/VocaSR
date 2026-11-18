@@ -10,6 +10,9 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QStringListModel
 from PyQt6.QtGui import QFocusEvent, QKeyEvent, QMouseEvent
 
 
+from voca.system.hotkeys import CAPTURING_TRIGGER, FN_KEYSYM
+
+
 class SearchableComboBox(QComboBox):
     """ComboBox with search/filter functionality."""
     
@@ -133,14 +136,7 @@ class HotkeyButton(QPushButton):
     """
 
     hotkeyChanged = pyqtSignal(str)
-
-    # Map Qt modifier flags to short names
-    _MOD_MAP = [
-        (Qt.KeyboardModifier.ControlModifier, "ctrl"),
-        (Qt.KeyboardModifier.AltModifier, "alt"),
-        (Qt.KeyboardModifier.ShiftModifier, "shift"),
-        (Qt.KeyboardModifier.MetaModifier, "super"),
-    ]
+    mouseCaptured = pyqtSignal(str)
 
     # Map Qt key codes to readable names
     _KEY_NAMES = {
@@ -162,13 +158,22 @@ class HotkeyButton(QPushButton):
         Qt.Key.Key_End: "end",
         Qt.Key.Key_PageUp: "page_up",
         Qt.Key.Key_PageDown: "page_down",
+        Qt.Key.Key_MediaPlay: "media_play_pause",
+        Qt.Key.Key_MediaTogglePlayPause: "media_play_pause",
+        Qt.Key.Key_MediaNext: "media_next",
+        Qt.Key.Key_MediaPrevious: "media_previous",
+        Qt.Key.Key_VolumeUp: "media_volume_up",
+        Qt.Key.Key_VolumeDown: "media_volume_down",
+        Qt.Key.Key_VolumeMute: "media_volume_mute",
     }
 
     def __init__(self, hotkey: str = "", parent=None):
         super().__init__(parent)
         self._hotkey = hotkey
         self._capturing = False
-        self._held_modifiers: list[str] = []
+        self._held_keys = {}
+        self._chord = []
+        self.mouseCaptured.connect(self._finish_capture)
         self._update_display()
         self.clicked.connect(self._start_capture)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -188,7 +193,7 @@ class HotkeyButton(QPushButton):
 
     def _update_display(self) -> None:
         if self._capturing:
-            self.setText("Press a key or mouse button...")
+            self.setText("Press and release a key or chord…")
             self.setStyleSheet("QPushButton { background-color: #553333; border: 2px solid #ff6666; }")
         else:
             self.setText(self._hotkey or "(none)")
@@ -206,8 +211,10 @@ class HotkeyButton(QPushButton):
         if self._capturing:
             return
         self._capturing = True
-        self._held_modifiers = []
-        self._non_modifier_pressed = False
+        self._held_keys.clear()
+        self._chord = []
+        CAPTURING_TRIGGER.set()
+        self.setToolTip('Fn works only if the keyboard sends it as a separate key event.')
         self._update_display()
         self.grabKeyboard()
         # Start xinput-based mouse button listener on all pointer devices
@@ -223,6 +230,7 @@ class HotkeyButton(QPushButton):
             return
         self._capturing = False
         self.releaseKeyboard()
+        CAPTURING_TRIGGER.clear()
         self._stop_xinput_listeners()
         self._hotkey = hotkey
         self._update_display()
@@ -231,6 +239,7 @@ class HotkeyButton(QPushButton):
     def _cancel_capture(self) -> None:
         self._capturing = False
         self.releaseKeyboard()
+        CAPTURING_TRIGGER.clear()
         self._stop_xinput_listeners()
         self._update_display()
 
@@ -260,12 +269,12 @@ class HotkeyButton(QPushButton):
             for line in proc.stdout:
                 if self._xinput_stop.is_set():
                     break
-                m = re.match(r"button press\s+(\d+)", line.strip())
+                m = re.match(r"button release\s+(\d+)", line.strip())
                 if m:
                     btn = int(m.group(1))
                     if btn >= 8:  # skip left/right/middle/scroll (1-7)
                         hotkey = f"button{btn}"
-                        QTimer.singleShot(0, lambda h=hotkey: self._finish_capture(h))
+                        self.mouseCaptured.emit(hotkey)
                         break
         except Exception:
             pass
@@ -285,63 +294,41 @@ class HotkeyButton(QPushButton):
             super().keyPressEvent(event)
             return
 
+        if event.isAutoRepeat():
+            return
         key = event.key()
-
-        # Escape cancels capture
         if key == Qt.Key.Key_Escape:
             self._cancel_capture()
             return
-
-        # Pure modifier press — just track it, don't finish yet
-        if key in (Qt.Key.Key_Control, Qt.Key.Key_Shift, Qt.Key.Key_Alt,
-                   Qt.Key.Key_Meta, Qt.Key.Key_AltGr):
-            return
-
-        self._non_modifier_pressed = True
-
-        # Build the hotkey string
-        parts = []
-        modifiers = event.modifiers()
-        for flag, name in self._MOD_MAP:
-            if modifiers & flag:
-                parts.append(name)
-
-        # Resolve the key name
-        if key in self._KEY_NAMES:
-            parts.append(self._KEY_NAMES[key])
-        elif Qt.Key.Key_F1 <= key <= Qt.Key.Key_F35:
-            parts.append(f"f{key - Qt.Key.Key_F1 + 1}")
-        elif Qt.Key.Key_A <= key <= Qt.Key.Key_Z:
-            parts.append(chr(key).lower())
-        elif Qt.Key.Key_0 <= key <= Qt.Key.Key_9:
-            parts.append(chr(key))
+        if event.nativeVirtualKey() == FN_KEYSYM:
+            name = "fn"
+        elif key in self._MOD_KEY_NAMES:
+            name = self._MOD_KEY_NAMES[key]
+        elif key in self._KEY_NAMES:
+            name = self._KEY_NAMES[key]
+        elif Qt.Key.Key_F1 <= key <= Qt.Key.Key_F20:
+            name = f"f{key - Qt.Key.Key_F1 + 1}"
+        elif Qt.Key.Key_A <= key <= Qt.Key.Key_Z or Qt.Key.Key_0 <= key <= Qt.Key.Key_9:
+            name = chr(key).lower()
         else:
-            text = event.text()
-            if text and text.isprintable():
-                parts.append(text.lower())
-            else:
-                # Unknown key, ignore
-                return
-
-        hotkey = "+".join(parts)
-        self._finish_capture(hotkey)
+            name = event.text().lower()
+        if name and name.isprintable() and name != "+":
+            physical = event.nativeScanCode() or key
+            self._held_keys[physical] = name
+            chord = list(dict.fromkeys(self._held_keys.values()))
+            if len(chord) >= len(self._chord):
+                self._chord = chord
+        event.accept()
 
     def keyReleaseEvent(self, event: QKeyEvent) -> None:
         if not self._capturing:
             super().keyReleaseEvent(event)
             return
-
-        # If a modifier is released and no non-modifier key was pressed,
-        # accept the bare modifier as the hotkey (e.g. just "ctrl")
-        key = event.key()
-        if not self._non_modifier_pressed and key in self._MOD_KEY_NAMES:
-            # Check no other modifiers are still held
-            remaining = event.modifiers()
-            if not remaining or remaining == Qt.KeyboardModifier.NoModifier:
-                self._finish_capture(self._MOD_KEY_NAMES[key])
-                return
-
-        # Swallow key releases during capture
+        if not event.isAutoRepeat():
+            physical = event.nativeScanCode() or event.key()
+            self._held_keys.pop(physical, None)
+            if not self._held_keys and self._chord:
+                self._finish_capture("+".join(self._chord))
         event.accept()
 
     def focusOutEvent(self, event: QFocusEvent) -> None:

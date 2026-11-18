@@ -62,7 +62,8 @@ class VocaApp:
         # Runtime state
         self.current_audio_file: Optional[str] = None
         self._running = False
-        self._state_lock = threading.Lock()
+        self._state_lock = threading.RLock()
+        self._hold_recording = False
         self._use_gui = False
 
         # Callbacks for GUI integration
@@ -100,12 +101,20 @@ class VocaApp:
         self._initialize_transcription()
         self._rebuild_orchestrator()
 
-    def change_hotkey(self, hotkey: str) -> None:
-        """Change the hotkey combination."""
-        if self.hotkey_manager:
-            self.hotkey_manager.set_hotkey(hotkey)
-            self.hotkey_manager.start_listening()
-        self.config_manager.set_setting("hotkey", hotkey)
+    def change_hotkey(self, hotkey: str, mode: Optional[str] = None) -> None:
+        mode = mode or self.config_manager.get_setting("hotkey_mode", "toggle")
+        HotkeyManager.parse_binding(hotkey)
+        if mode not in {"hold", "toggle"}:
+            raise ValueError("Choose Hold to record or Press to toggle.")
+        with self._state_lock:
+            if self.state != AppState.IDLE:
+                raise ValueError("Finish recording or transcription before changing the trigger.")
+            if self.hotkey_manager and (self.hotkey_manager.current_hotkey, self.hotkey_manager.mode) != (hotkey, mode):
+                self.hotkey_manager.set_hotkey(hotkey, mode)
+                self.hotkey_manager.start_listening()
+            self.config_manager.set_setting("hotkey", hotkey)
+            self.config_manager.set_setting("hotkey_mode", mode)
+
 
     def reload_corrections(self) -> None:
         """Reload correction rules from disk."""
@@ -136,7 +145,11 @@ class VocaApp:
             self.hotkey_manager.start_listening()
             self._running = True
 
-            print(f"✅ Voca ready! Press {self.config_manager.get_hotkey()} to start recording")
+            trigger = self.config_manager.get_hotkey()
+            if self.hotkey_manager.mode == "hold":
+                print(f"✅ Voca ready! Hold {trigger} to record, then release to transcribe")
+            else:
+                print(f"✅ Voca ready! Use {trigger} to toggle recording")
             return True
         except Exception as e:
             print(f"Failed to start Voca: {e}")
@@ -145,6 +158,7 @@ class VocaApp:
     def stop(self) -> None:
         self._running = False
         with self._state_lock:
+            self._cancel_hold()
             if self.audio_recorder and self.audio_recorder.is_recording():
                 try:
                     self.audio_recorder.stop_recording()
@@ -181,6 +195,10 @@ class VocaApp:
             print("Qwen ASR model loaded.")
 
         if not self.transcription_service.is_available():
+            if mode == "qwen" and self.config_manager.get_qwen_config()["backend"] in {"native-cpu", "native-cuda"}:
+                raise RuntimeError(
+                    "Native Qwen needs its executable and model files. See ../README.md."
+                )
             if mode == "qwen" and "local" in available_modes():
                 self.logger.warning(
                     "Qwen ASR not available. Falling back to local Whisper. "
@@ -241,11 +259,11 @@ class VocaApp:
 
     def _initialize_hotkeys(self) -> None:
         hotkey = self.config_manager.get_hotkey()
-        self.hotkey_manager = HotkeyManager(callback=self._on_hotkey_pressed)
+        self.hotkey_manager = HotkeyManager(self._on_trigger, self._finish_hold, self._cancel_hold)
         correction_hotkey = self.config_manager.get_setting("correction_hotkey", "ctrl+alt+space")
         if correction_hotkey:
             self.hotkey_manager.register_hotkey(correction_hotkey, self._on_correction_hotkey)
-        self.hotkey_manager.set_hotkey(hotkey)
+        self.hotkey_manager.set_hotkey(hotkey, self.config_manager.get_setting('hotkey_mode', 'toggle'))
 
     def _build_sub_components(self) -> None:
         """Create the recording orchestrator, pipeline, and correction flow."""
@@ -285,6 +303,32 @@ class VocaApp:
     # -----------------------------------------------------------------
     # Hotkey handlers
     # -----------------------------------------------------------------
+
+    def _on_trigger(self) -> None:
+        if self.hotkey_manager.mode == "toggle":
+            self._on_hotkey_pressed()
+            return
+        with self._state_lock:
+            if self._running and self.state == AppState.IDLE:
+                self._start_recording()
+                self._hold_recording = self.state == AppState.RECORDING
+
+    def _finish_hold(self) -> None:
+        with self._state_lock:
+            if self._hold_recording and self.state == AppState.RECORDING:
+                self._stop_recording_and_transcribe()
+            self._hold_recording = False
+
+    def _cancel_hold(self) -> None:
+        with self._state_lock:
+            if not self._hold_recording:
+                return
+            self._hold_recording = False
+            if self.state == AppState.RECORDING:
+                try:
+                    self._recording.discard_recording()
+                finally:
+                    self._pipeline.state = AppState.IDLE
 
     def _on_hotkey_pressed(self) -> None:
         self.logger.debug(f"Hotkey pressed! Current state: {self.state.value}")
@@ -330,6 +374,8 @@ class VocaApp:
             self._pipeline.state = AppState.IDLE
 
     def _on_audio_ready(self, audio_file: str, was_streaming: bool) -> None:
+        self._hold_recording = False
+        self._pipeline.state = AppState.TRANSCRIBING
         """Callback from RecordingOrchestrator when recording stops."""
         self.current_audio_file = audio_file
         if was_streaming:
@@ -368,15 +414,11 @@ class VocaApp:
         if self.vocabulary_manager:
             self.vocabulary_manager.load()
 
-        # Hotkey
-        new_hotkey = self.config_manager.get_hotkey()
-        if self.hotkey_manager and self.hotkey_manager.get_current_hotkey() != new_hotkey:
-            try:
-                self.hotkey_manager.set_hotkey(new_hotkey)
-                self.hotkey_manager.start_listening()
-                self.logger.info(f"Hotkey updated to: {new_hotkey}")
-            except Exception as e:
-                self.logger.error(f"Failed to update hotkey: {e}")
+        if self.hotkey_manager:
+            binding = self.config_manager.get_hotkey()
+            mode = self.config_manager.get_setting("hotkey_mode", "toggle")
+            if (binding, mode) != (self.hotkey_manager.current_hotkey, self.hotkey_manager.mode):
+                self.change_hotkey(binding, mode)
 
         # Transcription settings
         if self._transcription_settings_changed():
@@ -508,7 +550,7 @@ class VocaApp:
 
         try:
             test_manager = HotkeyManager(callback=on_hotkey)
-            test_manager.set_hotkey(hotkey)
+            test_manager.set_hotkey(hotkey, self.config_manager.get_setting("hotkey_mode", "toggle"))
             test_manager.start_listening()
             success = captured.wait(timeout=timeout)
             test_manager.stop_listening()

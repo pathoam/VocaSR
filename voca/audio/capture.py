@@ -66,6 +66,16 @@ class AudioRecorder:
 
         return self.temp_file_path
 
+    def discard_recording(self) -> None:
+        self.is_recording_flag = False
+        if self.recording_thread:
+            self.recording_thread.join()
+        if self.temp_file_path:
+            self.cleanup_temp_file(self.temp_file_path)
+            self.temp_file_path = None
+        while not self.audio_queue.empty():
+            self.audio_queue.get_nowait()
+
     def is_recording(self) -> bool:
         """Check if currently recording."""
         return self.is_recording_flag

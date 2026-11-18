@@ -59,6 +59,9 @@ class StreamingTranscriptionService(TranscriptionService):
         """
         pass
 
+    def cancel_streaming(self) -> None:
+        """Release resources for a discarded recording."""
+
     @abstractmethod
     def supports_streaming(self) -> bool:
         """

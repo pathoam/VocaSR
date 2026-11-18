@@ -219,7 +219,11 @@ class SettingsWindow(QMainWindow):
         hotkey_layout = QFormLayout(hotkey_group)
 
         self.hotkey_edit = HotkeyButton()
-        hotkey_layout.addRow("Hotkey:", self.hotkey_edit)
+        self.trigger_mode = QComboBox()
+        self.trigger_mode.addItem("Press to toggle", "toggle")
+        self.trigger_mode.addItem("Hold to record", "hold")
+        hotkey_layout.addRow("Recording mode", self.trigger_mode)
+        hotkey_layout.addRow("Trigger", self.hotkey_edit)
 
         layout.addWidget(hotkey_group)
 
@@ -260,6 +264,8 @@ class SettingsWindow(QMainWindow):
         self.qwen_backend_combo = QComboBox()
         self.qwen_backend_combo.addItem("auto", "auto")
         self.qwen_backend_combo.addItem("GPU — fastest inference", "gpu")
+        self.qwen_backend_combo.addItem("Native Qwen (CPU)", "native-cpu")
+        self.qwen_backend_combo.addItem("Native Qwen (CUDA)", "native-cuda")
         qwen_layout.addRow("Backend:", self.qwen_backend_combo)
 
         self.qwen_streaming_check = QCheckBox("Enable streaming during recording")
@@ -655,6 +661,7 @@ class SettingsWindow(QMainWindow):
                 break
 
         self.hotkey_edit.setHotkey(self.config_manager.get_hotkey())
+        self.trigger_mode.setCurrentIndex(1 if self.config_manager.get_setting('hotkey_mode', 'toggle') == 'hold' else 0)
         self.insertion_combo.setCurrentText(
             self.config_manager.get_text_insertion_method()
         )
@@ -709,6 +716,17 @@ class SettingsWindow(QMainWindow):
 
     def save_settings(self):
         """Save settings and close window."""
+        try:
+            hotkey, mode = self.hotkey_edit.hotkey(), self.trigger_mode.currentData()
+            if self.voca_app:
+                if (hotkey, mode) != (self.config_manager.get_hotkey(), self.config_manager.get_setting("hotkey_mode", "toggle")):
+                    self.voca_app.change_hotkey(hotkey, mode)
+            else:
+                from voca.system.hotkeys import HotkeyManager
+                HotkeyManager.parse_binding(hotkey)
+        except (ValueError, RuntimeError) as error:
+            QMessageBox.warning(self, "Recording trigger", str(error))
+            return
         self.config_manager.set_setting(
             "transcription_mode", self.mode_combo.currentText()
         )
@@ -719,7 +737,8 @@ class SettingsWindow(QMainWindow):
         self.config_manager.set_setting(
             "transcription_language", self.language_combo.currentData()
         )
-        self.config_manager.set_setting("hotkey", self.hotkey_edit.hotkey())
+        self.config_manager.set_setting("hotkey", hotkey)
+        self.config_manager.set_setting("hotkey_mode", mode)
         self.config_manager.set_setting(
             "text_insertion_method", self.insertion_combo.currentText()
         )
@@ -1166,7 +1185,7 @@ class VocaGUI(QMainWindow):
         painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "V")
         painter.end()
 
-        icon = QIcon(pixmap)
+        icon = QIcon.fromTheme("voca", QIcon(pixmap))
         self.tray_icon.setIcon(icon)
 
         # Create tray menu
@@ -1236,14 +1255,13 @@ class VocaGUI(QMainWindow):
 
     def _on_hotkey_changed(self, hotkey: str) -> None:
         """Handle hotkey change from the capture button."""
-        self.config_manager.set_setting("hotkey", hotkey)
-        if self.voca_app and self.voca_app.hotkey_manager:
-            try:
-                self.voca_app.hotkey_manager.set_hotkey(hotkey)
-                self.voca_app.hotkey_manager.start_listening()
-            except Exception as e:
-                self.update_status(f"Hotkey error: {e}")
-                return
+        try:
+            self.voca_app.change_hotkey(hotkey)
+            self.config_manager._load_config()
+        except (ValueError, RuntimeError) as error:
+            self.hotkey_button.setHotkey(self.config_manager.get_hotkey())
+            self.update_status(f"Hotkey error: {error}")
+            return
         self.update_status(f"Hotkey set to: {hotkey}")
 
     def start_voca(self):
@@ -1345,6 +1363,8 @@ def run_gui():
 
     # Set application properties
     app.setApplicationName("Voca")
+    app.setDesktopFileName("voca")
+    app.setWindowIcon(QIcon.fromTheme("voca"))
     app.setApplicationVersion("1.0.0")
 
     # Handle Ctrl+C properly

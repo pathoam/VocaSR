@@ -11,6 +11,7 @@ class ConfigManager:
 
     DEFAULT_CONFIG = {
         "transcription_mode": "qwen",  # "local", "api", or "qwen"
+        "hotkey_mode": "toggle",
         "hotkey": "ctrl+space",  # Default for Linux/Windows; macOS uses f12 (see _get_platform_default_hotkey)
         "api_key": "",
         "local_model_size": "base",
@@ -23,7 +24,7 @@ class ConfigManager:
         "first_run": True,
         "platform": "auto",
         "qwen_model_size": "0.6B",          # "0.6B" or "1.7B"
-        "qwen_backend": "auto",             # "auto" or "gpu"
+        "qwen_backend": "auto",             # "auto", "gpu", "native-cpu", or "native-cuda"
         "qwen_streaming_enabled": True,     # Enable streaming during recording
         "vllm_kv_cache_mb": 256,             # vLLM KV cache size in MB (256 for personal, 2048+ for server)
         "vllm_quantization": None,           # vLLM weight quantization: None, "fp8", "awq", or "gptq"
@@ -292,8 +293,8 @@ class ConfigManager:
         if self.config.get("transcription_mode") == "qwen":
             if self.config.get("qwen_model_size") not in ["0.6B", "1.7B"]:
                 errors["qwen_model_size"] = "Must be '0.6B' or '1.7B'"
-            if self.config.get("qwen_backend") not in ["auto", "gpu"]:
-                errors["qwen_backend"] = "Must be 'auto' or 'gpu'"
+            if self.config.get("qwen_backend") not in ["auto", "gpu", "native-cpu", "native-cuda"]:
+                errors["qwen_backend"] = "Must be auto, gpu, native-cpu, or native-cuda"
 
         # Validate sample rate
         sample_rate = self.config.get("audio_sample_rate")

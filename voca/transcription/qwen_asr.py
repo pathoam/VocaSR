@@ -9,7 +9,6 @@ import torch
 
 from voca.transcription.audio_segmenter import find_segment_boundary
 from voca.transcription.base import StreamingTranscriptionService, TranscriptionError
-from voca.transcription.registry import register_asr
 from voca.transcription.qwen_transformers_patch import (
     TransformersStreamingASRModel as _TransformersStreamingASRModel,
     resolve_language as _resolve_language,
@@ -640,6 +639,9 @@ class QwenASRService(StreamingTranscriptionService):
             info.update(self._backend.get_backend_info())
         return info
 
+    def cancel_streaming(self) -> None:
+        self.cleanup_session(_DEFAULT_SESSION)
+
     def get_partial_result(self, session_id: str = None) -> Optional[str]:
         if not self._backend:
             return None
@@ -683,17 +685,3 @@ class QwenASRService(StreamingTranscriptionService):
             return 0
         with self._backend._sessions_lock:
             return len(self._backend._sessions)
-
-
-@register_asr("qwen")
-def _create_qwen_service(config_manager, vocab_context):
-    qwen_config = config_manager.get_qwen_config()
-    language = config_manager.get_transcription_language()
-    return QwenASRService(
-        model_size=qwen_config["model_size"],
-        backend=qwen_config["backend"],
-        language=language,
-        kv_cache_mb=config_manager.get_setting("vllm_kv_cache_mb", 256),
-        context=vocab_context,
-        quantization=qwen_config.get("quantization"),
-    )

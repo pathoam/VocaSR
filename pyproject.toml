@@ -37,10 +37,10 @@ dependencies = [
     "packaging>=23.0",
     "PyQt6>=6.5.0",
     "requests>=2.31.0",
-    "qwen-asr>=0.0.6",
 ]
 
 [project.optional-dependencies]
+transformers = ["qwen-asr>=0.0.6"]
 build = ["pyinstaller>=6.0.0"]
 streaming = ["vllm==0.14.0"]
 api = ["fastapi>=0.104.0", "uvicorn[standard]>=0.24.0"]

@@ -89,6 +89,13 @@ class RecordingOrchestrator:
         audio_file = self.audio_recorder.stop_recording()
         self._on_audio_ready(audio_file, streaming)
 
+    def discard_recording(self) -> None:
+        self.audio_recorder.clear_chunk_callback()
+        self.audio_recorder.discard_recording()
+        if self._streaming:
+            self.transcription_service.cancel_streaming()
+        self._streaming = False
+
     def _check_recording_duration(self) -> None:
         if not self._max_recording_sec or not self._recording_start_time:
             return
